@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Error{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <div class="error-card">
+        <i class="ri-error-warning-line error-icon"></i>
+        <h1>Something went wrong</h1>
+        <p class="error-message">{{ error }}</p>
+
+        <div class="error-help">
+            <h3>Common solutions:</h3>
+            <ul>
+                <li>
+                    <strong>credentials.json not found:</strong>
+                    Download OAuth credentials from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>
+                </li>
+                <li>
+                    <strong>Authentication failed:</strong>
+                    Make sure you've enabled the Gmail API in your Google Cloud project
+                </li>
+                <li>
+                    <strong>Permission denied:</strong>
+                    Grant the requested permissions when prompted
+                </li>
+            </ul>
+        </div>
+
+        <a href="{{ url_for('index') }}" class="btn btn-primary">
+            <i class="ri-arrow-left-line"></i>
+            Back to Home
+        </a>
+    </div>
+</div>
+{% endblock %}

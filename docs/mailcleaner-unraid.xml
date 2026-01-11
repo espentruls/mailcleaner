@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>MailCleaner</Name>
+  <Repository>ghcr.io/espentruls/mailcleaner:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/espentruls/mailcleaner</Support>
+  <Project>https://github.com/espentruls/mailcleaner</Project>
+  <Overview>AI-powered email management for Gmail. Automatically categorizes emails, bulk delete spam/promos, and one-click unsubscribe.</Overview>
+  <Category>Tools: Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:5000]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/espentruls/mailcleaner/main/docs/mailcleaner-unraid.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/espentruls/mailcleaner/main/assets/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI Port" Target="5000" Default="5000" Mode="tcp" Description="Web interface port" Type="Port" Display="always" Required="true" Mask="false">5000</Config>
+  <Config Name="App Data" Target="/app/data" Default="/mnt/user/appdata/mailcleaner" Mode="rw" Description="Store credentials, tokens, and database" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/mailcleaner</Config>
+  <Config Name="OAUTHLIB_INSECURE_TRANSPORT" Target="OAUTHLIB_INSECURE_TRANSPORT" Default="1" Mode="" Description="Allow OAuth over HTTP (required for local)" Type="Variable" Display="advanced" Required="true" Mask="false">1</Config>
+  <Config Name="DOCKER_CONTAINER" Target="DOCKER_CONTAINER" Default="1" Mode="" Description="Docker environment flag" Type="Variable" Display="advanced" Required="true" Mask="false">1</Config>
+</Container>

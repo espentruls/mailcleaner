@@ -1,0 +1,27 @@
+# Core dependencies
+python-dotenv>=1.0.0
+
+# Google APIs
+google-auth>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0
+google-generativeai>=0.3.0
+
+# Web framework
+Flask>=3.0.0
+
+# HTTP requests
+requests>=2.28.0
+
+# Data processing
+pandas>=2.0.0
+
+# Email parsing
+mail-parser>=3.15.0
+
+# Machine Learning for local categorization
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Utilities
+numpy>=1.24.0

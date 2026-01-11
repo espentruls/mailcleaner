@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <div class="login-header">
+            <i class="ri-mail-check-line logo-icon"></i>
+            <h1>MailCleaner</h1>
+            <p>Intelligently clean your inbox with AI-powered email management</p>
+        </div>
+
+        <div class="features">
+            <div class="feature">
+                <i class="ri-spam-2-line"></i>
+                <span>Smart spam detection</span>
+            </div>
+            <div class="feature">
+                <i class="ri-group-line"></i>
+                <span>Group by sender</span>
+            </div>
+            <div class="feature">
+                <i class="ri-robot-line"></i>
+                <span>AI summarization</span>
+            </div>
+            <div class="feature">
+                <i class="ri-mail-close-line"></i>
+                <span>Auto unsubscribe</span>
+            </div>
+        </div>
+
+        <a href="{{ url_for('login') }}" class="login-btn">
+            <i class="ri-google-fill"></i>
+            Sign in with Google
+        </a>
+
+        <p class="disclaimer">
+            We only request necessary permissions to read, categorize, and manage your emails.
+            Your data stays private and is never shared.
+        </p>
+    </div>
+</div>
+{% endblock %}

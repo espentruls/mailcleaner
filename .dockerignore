@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temp files
+.tmp/
+data/
+*.log
+
+# Credentials (will be mounted as volumes)
+credentials.json
+token.json
+.env
+
+# Documentation
+*.md
+!directives/*.md
+
+# OS
+.DS_Store
+Thumbs.db

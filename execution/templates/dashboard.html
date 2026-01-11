@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <i class="ri-mail-check-line"></i>
+            <span>MailCleaner</span>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-view="overview">
+                <i class="ri-dashboard-line"></i>
+                <span>Overview</span>
+            </a>
+            <a href="#" class="nav-item" data-view="categories">
+                <i class="ri-folder-line"></i>
+                <span>Categories</span>
+            </a>
+            <a href="#" class="nav-item" data-view="senders">
+                <i class="ri-group-line"></i>
+                <span>By Sender</span>
+            </a>
+            <a href="#" class="nav-item" data-view="uncertain">
+                <i class="ri-question-line"></i>
+                <span>Review</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <a href="{{ url_for('logout') }}" class="nav-item">
+                <i class="ri-logout-box-line"></i>
+                <span>Logout</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 id="page-title">Overview</h1>
+            </div>
+            <div class="header-right">
+                <div class="filter-group">
+                    <select id="read-filter" class="filter-select">
+                        <option value="all">All Emails</option>
+                        <option value="unread">Unread Only</option>
+                        <option value="read">Read Only</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" id="fetch-btn">
+                    <i class="ri-refresh-line"></i>
+                    Fetch Emails
+                </button>
+            </div>
+        </header>
+
+        <!-- Overview View -->
+        <div id="overview-view" class="view active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon blue">
+                        <i class="ri-mail-line"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="total-emails">0</span>
+                        <span class="stat-label">Total Emails</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon orange">
+                        <i class="ri-mail-unread-line"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="total-unread">0</span>
+                        <span class="stat-label">Unread</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon red">
+                        <i class="ri-delete-bin-line"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="deletable">0</span>
+                        <span class="stat-label">Can Delete</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon green">
+                        <i class="ri-shield-check-line"></i>
+                    </div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="would-keep">0</span>
+                        <span class="stat-label">Keep</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content-grid">
+                <div class="card categories-card">
+                    <div class="card-header">
+                        <h3>Email Categories</h3>
+                    </div>
+                    <div class="card-content" id="category-list">
+                        <!-- Categories will be populated here -->
+                    </div>
+                </div>
+
+                <div class="card senders-card">
+                    <div class="card-header">
+                        <h3>Top Senders</h3>
+                    </div>
+                    <div class="card-content" id="top-senders">
+                        <!-- Top senders will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-bar">
+                <button class="btn btn-danger" id="delete-all-spam">
+                    <i class="ri-delete-bin-line"></i>
+                    Delete All Spam
+                </button>
+                <button class="btn btn-warning" id="delete-newsletters">
+                    <i class="ri-mail-close-line"></i>
+                    Clean Newsletters
+                </button>
+                <button class="btn btn-secondary" id="train-model">
+                    <i class="ri-brain-line"></i>
+                    Retrain AI
+                </button>
+            </div>
+        </div>
+
+        <!-- Categories View -->
+        <div id="categories-view" class="view">
+            <div class="category-tabs" id="category-tabs">
+                <!-- Category tabs -->
+            </div>
+            <div class="email-list" id="category-emails">
+                <!-- Emails by category -->
+            </div>
+        </div>
+
+        <!-- Senders View -->
+        <div id="senders-view" class="view">
+            <div class="sender-list" id="sender-list">
+                <!-- Grouped by sender -->
+            </div>
+        </div>
+
+        <!-- Review View -->
+        <div id="uncertain-view" class="view">
+            <div class="review-header">
+                <p>Review emails the AI is uncertain about. Your decisions help train the model.</p>
+            </div>
+            <div class="email-list" id="uncertain-emails">
+                <!-- Uncertain emails -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Email Detail Modal -->
+    <div id="email-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-subject">Email Subject</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="ri-close-line"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="email-meta">
+                    <span id="modal-sender"></span>
+                    <span id="modal-date"></span>
+                </div>
+                <div class="email-summary" id="modal-summary">
+                    <i class="ri-robot-line"></i>
+                    <span>Loading AI summary...</span>
+                </div>
+                <div class="email-preview" id="modal-preview"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-success" onclick="markKeep()">
+                    <i class="ri-check-line"></i>
+                    Keep
+                </button>
+                <button class="btn btn-danger" onclick="markDelete()">
+                    <i class="ri-delete-bin-line"></i>
+                    Delete
+                </button>
+                <button class="btn btn-warning" id="modal-unsubscribe" onclick="unsubscribe()">
+                    <i class="ri-mail-close-line"></i>
+                    Unsubscribe
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="ri-loader-4-line"></i>
+            <span id="loading-text">Loading...</span>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+</div>
+{% endblock %}

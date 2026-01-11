@@ -1,0 +1,964 @@
+{% extends "base.html" %}
+{% block title %}Setup - MailCleaner{% endblock %}
+
+{% block content %}
+<div class="onboarding-container">
+    <div class="onboarding-card">
+        <!-- Progress Bar - Simplified to 3 steps -->
+        <div class="progress-bar">
+            <div class="progress-step active" data-step="1">
+                <div class="step-number">1</div>
+                <span>Welcome</span>
+            </div>
+            <div class="progress-line"></div>
+            <div class="progress-step" data-step="2">
+                <div class="step-number">2</div>
+                <span>Google Setup</span>
+            </div>
+            <div class="progress-line"></div>
+            <div class="progress-step" data-step="3">
+                <div class="step-number">3</div>
+                <span>Connect</span>
+            </div>
+        </div>
+
+        <!-- Step 1: Welcome -->
+        <div class="step-content active" id="step-1">
+            <div class="step-icon">
+                <i class="ri-mail-check-line"></i>
+            </div>
+            <h1>Welcome to MailCleaner</h1>
+            <p class="step-description">
+                Clean your inbox intelligently with AI-powered email management.
+                Setup takes about 3 minutes.
+            </p>
+
+            <div class="features-preview">
+                <div class="feature-item">
+                    <i class="ri-spam-2-line"></i>
+                    <div>
+                        <strong>Smart Detection</strong>
+                        <span>Identify spam, newsletters & promotions</span>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <i class="ri-robot-line"></i>
+                    <div>
+                        <strong>AI Summaries</strong>
+                        <span>Quick email summaries with Gemini</span>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <i class="ri-delete-bin-line"></i>
+                    <div>
+                        <strong>Bulk Cleanup</strong>
+                        <span>Delete thousands with one click</span>
+                    </div>
+                </div>
+                <div class="feature-item">
+                    <i class="ri-mail-close-line"></i>
+                    <div>
+                        <strong>Auto Unsubscribe</strong>
+                        <span>Unsubscribe from mailing lists</span>
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn btn-primary btn-large" onclick="nextStep()">
+                Get Started <i class="ri-arrow-right-line"></i>
+            </button>
+        </div>
+
+        <!-- Step 2: Google Setup (All-in-One) -->
+        <div class="step-content" id="step-2">
+            <div class="step-icon blue">
+                <i class="ri-google-fill"></i>
+            </div>
+            <h1>Google Cloud Setup</h1>
+            <p class="step-description">
+                Follow these steps to create Gmail API credentials.
+                Click each button to open the correct page.
+            </p>
+
+            <div class="setup-checklist">
+                <!-- Sub-step 1: Create Project -->
+                <div class="checklist-item" id="check-1">
+                    <div class="checklist-header" onclick="toggleChecklist(1)">
+                        <div class="checklist-icon"><i class="ri-checkbox-blank-circle-line"></i></div>
+                        <div class="checklist-title">
+                            <strong>1. Create Google Cloud Project</strong>
+                            <span>Free, takes 30 seconds</span>
+                        </div>
+                        <i class="ri-arrow-down-s-line toggle-icon"></i>
+                    </div>
+                    <div class="checklist-content">
+                        <p>Click below, name your project "MailCleaner", then click Create.</p>
+                        <a href="https://console.cloud.google.com/projectcreate" target="_blank"
+                            class="btn btn-secondary">
+                            <i class="ri-external-link-line"></i> Create Project
+                        </a>
+                        <button class="btn btn-outline done-btn" onclick="markDone(1)">
+                            <i class="ri-check-line"></i> Done
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sub-step 2: Enable Gmail API -->
+                <div class="checklist-item" id="check-2">
+                    <div class="checklist-header" onclick="toggleChecklist(2)">
+                        <div class="checklist-icon"><i class="ri-checkbox-blank-circle-line"></i></div>
+                        <div class="checklist-title">
+                            <strong>2. Enable Gmail API</strong>
+                            <span>One click to enable</span>
+                        </div>
+                        <i class="ri-arrow-down-s-line toggle-icon"></i>
+                    </div>
+                    <div class="checklist-content">
+                        <p>Click below, then click the blue "Enable" button.</p>
+                        <a href="https://console.cloud.google.com/apis/library/gmail.googleapis.com" target="_blank"
+                            class="btn btn-secondary">
+                            <i class="ri-external-link-line"></i> Enable Gmail API
+                        </a>
+                        <button class="btn btn-outline done-btn" onclick="markDone(2)">
+                            <i class="ri-check-line"></i> Done
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sub-step 3: Configure OAuth Consent -->
+                <div class="checklist-item" id="check-3">
+                    <div class="checklist-header" onclick="toggleChecklist(3)">
+                        <div class="checklist-icon"><i class="ri-checkbox-blank-circle-line"></i></div>
+                        <div class="checklist-title">
+                            <strong>3. Configure OAuth Consent</strong>
+                            <span>Set up app permissions</span>
+                        </div>
+                        <i class="ri-arrow-down-s-line toggle-icon"></i>
+                    </div>
+                    <div class="checklist-content">
+                        <p>Select <strong>External</strong>, enter app name "MailCleaner" and your email. Go to
+                            <strong>Audience</strong> and add yourself as a <strong>Test User</strong>.</p>
+                        <a href="https://console.cloud.google.com/auth/overview" target="_blank"
+                            class="btn btn-secondary">
+                            <i class="ri-external-link-line"></i> Configure Consent
+                        </a>
+                        <button class="btn btn-outline done-btn" onclick="markDone(3)">
+                            <i class="ri-check-line"></i> Done
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sub-step 4: Create Credentials -->
+                <div class="checklist-item" id="check-4">
+                    <div class="checklist-header" onclick="toggleChecklist(4)">
+                        <div class="checklist-icon"><i class="ri-checkbox-blank-circle-line"></i></div>
+                        <div class="checklist-title">
+                            <strong>4. Create OAuth Credentials</strong>
+                            <span>Download the JSON file</span>
+                        </div>
+                        <i class="ri-arrow-down-s-line toggle-icon"></i>
+                    </div>
+                    <div class="checklist-content">
+                        <p>Select <strong>Web application</strong>, name it "MailCleaner", add redirect URI:
+                            <code>http://localhost:5000/auth/callback</code>, click Create, then <strong>Download
+                                JSON</strong>.</p>
+                        <a href="https://console.cloud.google.com/auth/clients" target="_blank"
+                            class="btn btn-secondary">
+                            <i class="ri-external-link-line"></i> Create Credentials
+                        </a>
+                        <button class="btn btn-outline done-btn" onclick="markDone(4)">
+                            <i class="ri-check-line"></i> Done
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sub-step 5: Upload -->
+                <div class="checklist-item expanded" id="check-5">
+                    <div class="checklist-header">
+                        <div class="checklist-icon"><i class="ri-checkbox-blank-circle-line"></i></div>
+                        <div class="checklist-title">
+                            <strong>5. Upload Your Credentials</strong>
+                            <span>Almost there!</span>
+                        </div>
+                    </div>
+                    <div class="checklist-content always-visible">
+                        <div class="upload-area" id="credentials-upload">
+                            <input type="file" id="credentials-file" accept=".json"
+                                onchange="handleCredentialsUpload(event)">
+                            <label for="credentials-file">
+                                <i class="ri-upload-cloud-line"></i>
+                                <span>Drop credentials.json here or click to upload</span>
+                            </label>
+                        </div>
+                        <div id="upload-status" class="upload-status"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="step-actions">
+                <button class="btn btn-secondary" onclick="prevStep()">
+                    <i class="ri-arrow-left-line"></i> Back
+                </button>
+                <button class="btn btn-primary" id="step2-next" onclick="nextStep()" disabled>
+                    Continue <i class="ri-arrow-right-line"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Step 3: Ready to Connect -->
+        <div class="step-content" id="step-3">
+            <div class="step-icon success">
+                <i class="ri-checkbox-circle-line"></i>
+            </div>
+            <h1>Ready to Connect!</h1>
+            <p class="step-description">
+                Your credentials are set up. Click below to connect your Gmail account.
+            </p>
+
+            <div class="setup-summary">
+                <div class="summary-item">
+                    <i class="ri-checkbox-circle-fill success-icon"></i>
+                    <span>Google Cloud Project Created</span>
+                </div>
+                <div class="summary-item">
+                    <i class="ri-checkbox-circle-fill success-icon"></i>
+                    <span>Gmail API Enabled</span>
+                </div>
+                <div class="summary-item">
+                    <i class="ri-checkbox-circle-fill success-icon"></i>
+                    <span>OAuth Credentials Uploaded</span>
+                </div>
+            </div>
+
+            <!-- Optional: Gemini API Key -->
+            <div class="optional-section">
+                <div class="optional-header" onclick="toggleGemini()">
+                    <i class="ri-robot-line"></i>
+                    <span>Add Gemini AI for Summaries (Optional)</span>
+                    <i class="ri-arrow-down-s-line toggle-icon" id="gemini-toggle"></i>
+                </div>
+                <div class="optional-content" id="gemini-section">
+                    <p>Get AI-powered email summaries with your Gemini Pro subscription.</p>
+                    <a href="https://aistudio.google.com/apikey" target="_blank" class="btn btn-secondary btn-sm">
+                        <i class="ri-external-link-line"></i> Get API Key
+                    </a>
+                    <div class="api-key-input">
+                        <input type="password" id="gemini-key" placeholder="Paste Gemini API key">
+                        <button class="btn btn-sm" onclick="toggleKeyVisibility()">
+                            <i class="ri-eye-line" id="eye-icon"></i>
+                        </button>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" onclick="saveGeminiKey()" style="margin-top: 8px;">
+                        <i class="ri-save-line"></i> Save Key
+                    </button>
+                    <div id="gemini-status" class="upload-status"></div>
+                </div>
+            </div>
+
+            <div class="final-actions">
+                <a href="{{ url_for('login') }}" class="btn btn-primary btn-large">
+                    <i class="ri-google-fill"></i> Connect Gmail & Start
+                </a>
+            </div>
+
+            <p class="privacy-note">
+                <i class="ri-shield-check-line"></i>
+                Your data stays private. Emails are processed locally.
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentStep = 1;
+    const totalSteps = 3;
+    let credentialsUploaded = false;
+    let checklistDone = [false, false, false, false, false];
+
+    function updateProgress() {
+        document.querySelectorAll('.progress-step').forEach((step, index) => {
+            const stepNum = index + 1;
+            step.classList.toggle('active', stepNum <= currentStep);
+            step.classList.toggle('completed', stepNum < currentStep);
+        });
+
+        document.querySelectorAll('.step-content').forEach((content, index) => {
+            content.classList.toggle('active', index + 1 === currentStep);
+        });
+    }
+
+    function nextStep() {
+        if (currentStep < totalSteps) {
+            currentStep++;
+            updateProgress();
+        }
+    }
+
+    function prevStep() {
+        if (currentStep > 1) {
+            currentStep--;
+            updateProgress();
+        }
+    }
+
+    function toggleChecklist(num) {
+        const item = document.getElementById(`check-${num}`);
+        if (item.classList.contains('expanded')) {
+            item.classList.remove('expanded');
+        } else {
+            // Close others
+            document.querySelectorAll('.checklist-item').forEach(el => el.classList.remove('expanded'));
+            item.classList.add('expanded');
+        }
+    }
+
+    function markDone(num) {
+        checklistDone[num - 1] = true;
+        const item = document.getElementById(`check-${num}`);
+        const icon = item.querySelector('.checklist-icon i');
+        icon.className = 'ri-checkbox-circle-fill';
+        icon.style.color = 'var(--success)';
+        item.classList.remove('expanded');
+        item.classList.add('done');
+
+        // Open next item
+        if (num < 5) {
+            setTimeout(() => toggleChecklist(num + 1), 200);
+        }
+    }
+
+    function toggleGemini() {
+        const section = document.getElementById('gemini-section');
+        const toggle = document.getElementById('gemini-toggle');
+        section.classList.toggle('visible');
+        toggle.style.transform = section.classList.contains('visible') ? 'rotate(180deg)' : '';
+    }
+
+    async function handleCredentialsUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const statusEl = document.getElementById('upload-status');
+        const nextBtn = document.getElementById('step2-next');
+
+        statusEl.innerHTML = '<i class="ri-loader-4-line spinning"></i> Uploading...';
+        statusEl.className = 'upload-status loading';
+
+        const formData = new FormData();
+        formData.append('credentials', file);
+
+        try {
+            const response = await fetch('/api/setup/credentials', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                statusEl.innerHTML = '<i class="ri-checkbox-circle-line"></i> Credentials uploaded! Click Continue.';
+                statusEl.className = 'upload-status success';
+                credentialsUploaded = true;
+                nextBtn.disabled = false;
+
+                // Mark step 5 as done
+                markDone(5);
+
+                // Auto-proceed after short delay
+                setTimeout(() => nextStep(), 1000);
+            } else {
+                statusEl.innerHTML = '<i class="ri-error-warning-line"></i> ' + result.error;
+                statusEl.className = 'upload-status error';
+            }
+        } catch (error) {
+            statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Upload failed. Please try again.';
+            statusEl.className = 'upload-status error';
+        }
+    }
+
+    async function saveGeminiKey() {
+        const keyInput = document.getElementById('gemini-key');
+        const statusEl = document.getElementById('gemini-status');
+        const key = keyInput.value.trim();
+
+        if (!key) {
+            statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Please enter an API key';
+            statusEl.className = 'upload-status error';
+            return;
+        }
+
+        statusEl.innerHTML = '<i class="ri-loader-4-line spinning"></i> Validating...';
+        statusEl.className = 'upload-status loading';
+
+        try {
+            const response = await fetch('/api/setup/gemini', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ api_key: key })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                statusEl.innerHTML = '<i class="ri-checkbox-circle-line"></i> API key saved!';
+                statusEl.className = 'upload-status success';
+            } else {
+                statusEl.innerHTML = '<i class="ri-error-warning-line"></i> ' + result.error;
+                statusEl.className = 'upload-status error';
+            }
+        } catch (error) {
+            statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Failed to save key.';
+            statusEl.className = 'upload-status error';
+        }
+    }
+
+    function toggleKeyVisibility() {
+        const input = document.getElementById('gemini-key');
+        const icon = document.getElementById('eye-icon');
+
+        if (input.type === 'password') {
+            input.type = 'text';
+            icon.className = 'ri-eye-off-line';
+        } else {
+            input.type = 'password';
+            icon.className = 'ri-eye-line';
+        }
+    }
+
+    // Drag and drop
+    const uploadArea = document.getElementById('credentials-upload');
+    if (uploadArea) {
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => uploadArea.classList.add('dragover'));
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            uploadArea.addEventListener(eventName, () => uploadArea.classList.remove('dragover'));
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            const file = e.dataTransfer.files[0];
+            if (file && file.name.endsWith('.json')) {
+                document.getElementById('credentials-file').files = e.dataTransfer.files;
+                handleCredentialsUpload({ target: { files: [file] } });
+            }
+        });
+    }
+
+    // Check existing setup
+    async function checkSetupStatus() {
+        try {
+            const response = await fetch('/api/setup/status');
+            const status = await response.json();
+
+            if (status.credentials_exists) {
+                credentialsUploaded = true;
+                document.getElementById('step2-next').disabled = false;
+                // Jump to step 3
+                currentStep = 3;
+                updateProgress();
+            }
+
+            if (status.fully_configured) {
+                window.location.href = '/';
+            }
+        } catch (error) {
+            console.error('Failed to check setup status:', error);
+        }
+    }
+
+    checkSetupStatus();
+</script>
+
+<style>
+    /* Onboarding Container */
+    .onboarding-container {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 20px;
+        background: linear-gradient(135deg, var(--bg-primary) 0%, #1a1a2e 100%);
+    }
+
+    .onboarding-card {
+        background: var(--bg-card);
+        border-radius: 16px;
+        padding: 40px;
+        max-width: 600px;
+        width: 100%;
+        border: 1px solid var(--border-color);
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Progress Bar */
+    .progress-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 40px;
+    }
+
+    .progress-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        opacity: 0.4;
+        transition: all 0.3s ease;
+    }
+
+    .progress-step.active {
+        opacity: 1;
+    }
+
+    .progress-step.completed .step-number {
+        background: var(--success);
+    }
+
+    .step-number {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--bg-tertiary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+
+    .progress-step.active .step-number {
+        background: var(--primary);
+    }
+
+    .progress-step span {
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .progress-line {
+        flex: 1;
+        height: 2px;
+        background: var(--bg-tertiary);
+        margin: 0 16px;
+        margin-bottom: 24px;
+        max-width: 80px;
+    }
+
+    /* Step Content */
+    .step-content {
+        display: none;
+        animation: fadeIn 0.3s ease;
+    }
+
+    .step-content.active {
+        display: block;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .step-icon {
+        width: 80px;
+        height: 80px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 24px;
+    }
+
+    .step-icon i {
+        font-size: 40px;
+        color: white;
+    }
+
+    .step-icon.blue {
+        background: linear-gradient(135deg, #4285f4, #1a73e8);
+    }
+
+    .step-icon.success {
+        background: linear-gradient(135deg, #10b981, #059669);
+    }
+
+    .step-content h1 {
+        text-align: center;
+        font-size: 28px;
+        margin-bottom: 12px;
+    }
+
+    .step-description {
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 15px;
+        margin-bottom: 32px;
+    }
+
+    /* Features Preview */
+    .features-preview {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 32px;
+    }
+
+    .feature-item {
+        display: flex;
+        gap: 12px;
+        padding: 14px;
+        background: var(--bg-secondary);
+        border-radius: 10px;
+        border: 1px solid var(--border-color);
+    }
+
+    .feature-item i {
+        font-size: 24px;
+        color: var(--primary);
+    }
+
+    .feature-item strong {
+        display: block;
+        font-size: 13px;
+        margin-bottom: 2px;
+    }
+
+    .feature-item span {
+        font-size: 11px;
+        color: var(--text-secondary);
+    }
+
+    /* Buttons */
+    .btn-large {
+        padding: 16px 32px;
+        font-size: 16px;
+    }
+
+    .btn-outline {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+    }
+
+    .btn-outline:hover {
+        background: var(--bg-tertiary);
+    }
+
+    .btn-sm {
+        padding: 8px 16px;
+        font-size: 13px;
+    }
+
+    .step-actions {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 32px;
+    }
+
+    /* Checklist */
+    .setup-checklist {
+        margin: 24px 0;
+    }
+
+    .checklist-item {
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        margin-bottom: 8px;
+        overflow: hidden;
+        transition: all 0.2s ease;
+    }
+
+    .checklist-item.done {
+        border-color: var(--success);
+        background: rgba(16, 185, 129, 0.05);
+    }
+
+    .checklist-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+
+    .checklist-header:hover {
+        background: var(--bg-secondary);
+    }
+
+    .checklist-icon i {
+        font-size: 20px;
+        color: var(--text-muted);
+    }
+
+    .checklist-title {
+        flex: 1;
+    }
+
+    .checklist-title strong {
+        display: block;
+        font-size: 14px;
+    }
+
+    .checklist-title span {
+        font-size: 12px;
+        color: var(--text-muted);
+    }
+
+    .toggle-icon {
+        transition: transform 0.2s;
+        color: var(--text-muted);
+    }
+
+    .checklist-item.expanded .toggle-icon {
+        transform: rotate(180deg);
+    }
+
+    .checklist-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease, padding 0.3s ease;
+        padding: 0 16px;
+        background: var(--bg-secondary);
+    }
+
+    .checklist-item.expanded .checklist-content,
+    .checklist-content.always-visible {
+        max-height: 300px;
+        padding: 16px;
+    }
+
+    .checklist-content p {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+    }
+
+    .checklist-content .btn {
+        margin-right: 8px;
+    }
+
+    .done-btn {
+        margin-left: auto;
+    }
+
+    /* Upload Area */
+    .upload-area {
+        border: 2px dashed var(--border-color);
+        border-radius: 10px;
+        padding: 24px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .upload-area:hover,
+    .upload-area.dragover {
+        border-color: var(--primary);
+        background: rgba(99, 102, 241, 0.1);
+    }
+
+    .upload-area input {
+        display: none;
+    }
+
+    .upload-area label {
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .upload-area i {
+        font-size: 36px;
+        color: var(--primary);
+    }
+
+    .upload-area span {
+        font-size: 14px;
+        color: var(--text-secondary);
+    }
+
+    .upload-status {
+        margin-top: 12px;
+        padding: 10px 16px;
+        border-radius: 8px;
+        font-size: 13px;
+        display: none;
+    }
+
+    .upload-status.loading,
+    .upload-status.success,
+    .upload-status.error {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .upload-status.loading {
+        background: rgba(99, 102, 241, 0.2);
+        color: var(--primary);
+    }
+
+    .upload-status.success {
+        background: rgba(16, 185, 129, 0.2);
+        color: var(--success);
+    }
+
+    .upload-status.error {
+        background: rgba(239, 68, 68, 0.2);
+        color: var(--danger);
+    }
+
+    .spinning {
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    /* Summary */
+    .setup-summary {
+        background: var(--bg-secondary);
+        padding: 20px;
+        border-radius: 10px;
+        margin: 24px 0;
+    }
+
+    .summary-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .summary-item:last-child {
+        border-bottom: none;
+    }
+
+    .success-icon {
+        color: var(--success);
+        font-size: 20px;
+    }
+
+    /* Optional Section */
+    .optional-section {
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        margin: 24px 0;
+        overflow: hidden;
+    }
+
+    .optional-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 16px;
+        cursor: pointer;
+        background: var(--bg-secondary);
+    }
+
+    .optional-header i:first-child {
+        font-size: 20px;
+        color: #a78bfa;
+    }
+
+    .optional-header span {
+        flex: 1;
+        font-size: 14px;
+    }
+
+    .optional-header .toggle-icon {
+        transition: transform 0.2s;
+    }
+
+    .optional-content {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease, padding 0.3s ease;
+        padding: 0 16px;
+    }
+
+    .optional-content.visible {
+        max-height: 300px;
+        padding: 16px;
+    }
+
+    .optional-content p {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 12px;
+    }
+
+    .api-key-input {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+
+    .api-key-input input {
+        flex: 1;
+        padding: 10px 14px;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        color: var(--text-primary);
+        font-family: monospace;
+        font-size: 13px;
+    }
+
+    .api-key-input input:focus {
+        outline: none;
+        border-color: var(--primary);
+    }
+
+    /* Final Actions */
+    .final-actions {
+        text-align: center;
+        margin: 32px 0 16px;
+    }
+
+    .privacy-note {
+        text-align: center;
+        font-size: 12px;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
+
+    /* Responsive */
+    @media (max-width: 500px) {
+        .onboarding-card {
+            padding: 24px;
+        }
+
+        .features-preview {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
