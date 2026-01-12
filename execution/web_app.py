@@ -8,7 +8,8 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict
+import threading
 from collections import defaultdict
 
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session
@@ -44,11 +45,22 @@ else:
     ENV_PATH = BASE_PATH / ".env"
 
 # Global instances (initialized on first request)
+BASE_URL = os.getenv('BASE_URL', 'http://localhost:5000').rstrip('/')
 db: Optional[Database] = None
 gmail_client = None
 categorizer = None
 summarizer = None
 unsubscriber = None
+
+# Background Sync State
+sync_state: Dict = {
+    'status': 'idle',  # idle, fetching, completed, stopped, error
+    'current': 0,
+    'total': 0,
+    'error': None
+}
+sync_stop_event = threading.Event()
+sync_thread = None
 
 
 def init_services():
@@ -72,6 +84,26 @@ def init_services():
         summarizer = EmailSummarizer()
     if gmail_client is None:
         gmail_client = GmailClient()
+
+    # Restore service if token exists but service is missing (e.g. after restart)
+    if gmail_client.service is None and TOKEN_PATH.exists():
+        try:
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+            from googleapiclient.discovery import build
+            from gmail_client import SCOPES
+
+            creds = Credentials.from_authorized_user_file(str(TOKEN_PATH), SCOPES)
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                with open(TOKEN_PATH, 'w') as token_file:
+                    token_file.write(creds.to_json())
+
+            if creds and creds.valid:
+                gmail_client.service = build('gmail', 'v1', credentials=creds)
+        except Exception as e:
+            print(f"Error restoring Gmail service: {e}")
+
     if unsubscriber is None:
         unsubscriber = UnsubscribeHandler(gmail_client, db)
 
@@ -108,11 +140,10 @@ def before_request():
 @app.route('/')
 def index():
     """Main page - show onboarding, login, or dashboard."""
-    if not is_setup_complete():
-        return redirect(url_for('onboarding'))
-
+    setup_ok = is_setup_complete()
+    
     if not is_authenticated():
-        return render_template('login.html')
+        return render_template('login.html', needs_setup=not setup_ok)
 
     return render_template('dashboard.html')
 
@@ -120,7 +151,7 @@ def index():
 @app.route('/setup')
 def onboarding():
     """Show onboarding/setup page."""
-    return render_template('onboarding.html')
+    return render_template('onboarding.html', base_url=BASE_URL)
 
 
 @app.route('/api/setup/status')
@@ -171,7 +202,7 @@ def api_setup_credentials():
             }), 400
 
         # Save the file
-        with open(CREDENTIALS_PATH, 'w') as f:
+        with open(CREDENTIALS_PATH, 'w', encoding='utf-8') as f:
             f.write(content)
 
         return jsonify({'success': True})
@@ -257,8 +288,8 @@ def login():
         import json
         from google_auth_oauthlib.flow import Flow
         
-        # Read credentials to determine type
-        with open(CREDENTIALS_PATH) as f:
+        # Read credentials as UTF-8
+        with open(CREDENTIALS_PATH, 'r', encoding='utf-8') as f:
             creds_data = json.load(f)
         
         # Determine if web or desktop credentials
@@ -271,7 +302,7 @@ def login():
                     'https://www.googleapis.com/auth/gmail.modify',
                     'https://www.googleapis.com/auth/gmail.send',
                 ],
-                redirect_uri='http://localhost:5000/auth/callback'
+                redirect_uri=f"{BASE_URL}/auth/callback"
             )
             
             authorization_url, state = flow.authorization_url(
@@ -319,6 +350,7 @@ def oauth_callback():
         from google_auth_oauthlib.flow import Flow
         
         # Recreate the flow
+        # Pass credentials as UTF-8
         flow = Flow.from_client_secrets_file(
             str(CREDENTIALS_PATH),
             scopes=[
@@ -326,7 +358,7 @@ def oauth_callback():
                 'https://www.googleapis.com/auth/gmail.modify',
                 'https://www.googleapis.com/auth/gmail.send',
             ],
-            redirect_uri='http://localhost:5000/auth/callback',
+            redirect_uri=f"{BASE_URL}/auth/callback",
             state=session.get('oauth_state')
         )
         
@@ -351,6 +383,22 @@ def oauth_callback():
         
     except Exception as e:
         return render_template('error.html', error=f"OAuth callback failed: {str(e)}")
+
+@app.route('/api/setup/reset', methods=['POST'])
+def api_setup_reset():
+    """Reset credentials and logout."""
+    try:
+        if CREDENTIALS_PATH.exists():
+            CREDENTIALS_PATH.unlink()
+        if TOKEN_PATH.exists():
+            TOKEN_PATH.unlink()
+        
+        # Clear session
+        session.clear()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def build_gmail_service(creds):
@@ -385,11 +433,25 @@ def api_fetch_emails():
     if not is_authenticated():
         return jsonify({'error': 'Not authenticated'}), 401
 
+    global sync_thread, sync_state
+
     try:
         data = request.json or {}
-        max_emails = min(data.get('max_emails', 500), 2000)
+        
+        # Check if user just wants the total count first
+        if data.get('get_total', False):
+            profile = gmail_client.get_profile()
+            total = profile.get('messagesTotal', 0)
+            return jsonify({'total': total})
+
+        # Don't start if already running
+        if sync_state['status'] == 'fetching':
+            return jsonify({'error': 'Sync already in progress'}), 400
+
+        max_emails = data.get('max_emails') or 500  # Handle None/null explicitly
         query = data.get('query', '')
         read_filter = data.get('read_filter', 'all')
+        fresh = data.get('fresh', False)
 
         # Build query based on filter
         if read_filter == 'unread':
@@ -397,30 +459,165 @@ def api_fetch_emails():
         elif read_filter == 'read':
             query = f"{query} -is:unread".strip()
 
-        # Clear existing data if fresh fetch
-        if data.get('fresh', False):
-            db.clear_all()
-
-        # Fetch emails
-        emails = gmail_client.fetch_all_emails(query=query, max_emails=max_emails)
-
-        # Categorize
-        categorizer.categorize_batch(emails)
-
-        # Save to database
-        db.save_emails_batch(emails)
-
-        # Get stats
-        stats = db.get_category_stats()
-
-        return jsonify({
-            'success': True,
-            'total_fetched': len(emails),
-            'stats': stats
+        # Reset sync state
+        sync_state.update({
+            'status': 'fetching',
+            'current': 0,
+            'total': max_emails,
+            'error': None
         })
+        sync_stop_event.clear()
+
+        def background_sync():
+            try:
+                print(f"[SYNC] Starting background sync: max_emails={max_emails}, fresh={fresh}")
+                
+                current_count = 0 
+                
+                # Clear existing data if fresh fetch
+                if fresh:
+                    print("[SYNC] Clearing existing data...")
+                    db.clear_all()
+                    db.set_setting('sync_min_date', '')
+                    db.set_setting('sync_max_date', '')
+                
+                # Load sync state
+                min_ts_str = db.get_setting('sync_min_date')
+                max_ts_str = db.get_setting('sync_max_date')
+                min_ts = float(min_ts_str) if min_ts_str else None
+                max_ts = float(max_ts_str) if max_ts_str else None
+                
+                print(f"[SYNC] Resume state: min_ts={min_ts}, max_ts={max_ts}")
+
+                def process_batch(emails, batch_type="history"):
+                    if not emails: return
+                    
+                    nonlocal min_ts, max_ts, current_count
+                    
+                    # Update min/max dates
+                    for e in emails:
+                        if e.date:
+                            ts = e.date.timestamp()
+                            if min_ts is None or ts < min_ts: min_ts = ts
+                            if max_ts is None or ts > max_ts: max_ts = ts
+                    
+                # Save Sync State (Use float for precision)
+                    if min_ts: db.set_setting('sync_min_date', str(min_ts))
+                    if max_ts: db.set_setting('sync_max_date', str(max_ts))
+                    
+                    print(f"[SYNC] Categorizing {len(emails)} {batch_type} emails...")
+                    categorizer.categorize_batch(emails)
+                    
+                    print(f"[SYNC] Saving {len(emails)} {batch_type} emails...")
+                    db.save_emails_batch(emails)
+                    
+                    current_count += len(emails)
+                    sync_state['current'] = current_count
+
+                # Wrapper callback to adjust for the phase
+                def progress_callback(fetched, total):
+                    # This is approximate since we have two phases
+                    pass 
+
+                # ---------------------------------------------------------
+                # Phase 1: Fetch NEW emails (newer than last sync)
+                # ---------------------------------------------------------
+                if max_ts and not fresh:
+                    print(f"[SYNC] Phase 1: Checking for new emails (after {max_ts})...")
+                    # Add 1 second to avoid overlap in query, but filter strictly later
+                    # Handle float strings safely
+                    new_query = f"{query} after:{int(float(max_ts)) + 1}".strip()
+                    
+                    # Fetch new emails
+                    new_emails = gmail_client.fetch_all_emails(
+                        query=new_query, 
+                        max_emails=max_emails, # Eat into the quota
+                        callback=lambda c, t: None,
+                        stop_event=sync_stop_event
+                    )
+                    
+                    # Strict Deduplication: Filter out any emails <= max_ts
+                    # This handles edge cases where Gmail API might include the boundary second
+                    if new_emails:
+                        original_count = len(new_emails)
+                        max_ts_float = float(max_ts)
+                        new_emails = [e for e in new_emails if e.date.timestamp() > max_ts_float]
+                        if len(new_emails) < original_count:
+                            print(f"[SYNC] Filtered out {original_count - len(new_emails)} overlapping emails")
+                    
+                    if new_emails:
+                        print(f"[SYNC] Found {len(new_emails)} NEW unique emails")
+                        process_batch(new_emails, "NEW")
+                    else:
+                        print("[SYNC] No new emails found")
+
+                # ---------------------------------------------------------
+                # Phase 2: Resume History (older than last sync)
+                # ---------------------------------------------------------
+                remaining_quota = max_emails - current_count
+                
+                if remaining_quota > 0 and not sync_stop_event.is_set():
+                    print(f"[SYNC] Phase 2: Fetching history (quota: {remaining_quota})...")
+                    
+                    history_query = query
+                    if min_ts and not fresh:
+                        # Subtract 1 second to avoid overlap
+                        history_query = f"{query} before:{int(float(min_ts)) - 1}".strip()
+                        print(f"[SYNC] Resuming history from timestamp {min_ts}")
+                    
+                    def history_callback(fetched, total):
+                        sync_state['current'] = current_count + fetched
+                        sync_state['total'] = max_emails
+
+                    history_emails = gmail_client.fetch_all_emails(
+                        query=history_query,
+                        max_emails=remaining_quota,
+                        callback=history_callback,
+                        stop_event=sync_stop_event
+                    )
+                    
+                    if history_emails:
+                        process_batch(history_emails, "history")
+                    else:
+                        print("[SYNC] No more history emails found")
+
+                # Final Status Update
+                if sync_stop_event.is_set():
+                    sync_state['status'] = 'stopped'
+                    print("[SYNC] Sync was stopped by user")
+                else:
+                    sync_state['status'] = 'completed'
+                    
+                sync_state['current'] = current_count
+                print(f"[SYNC] Sync finished with status: {sync_state['status']}")
+                print(f"[SYNC] Total emails processed: {current_count}")
+                print(f"[SYNC] New Sync Window: {datetime.fromtimestamp(min_ts) if min_ts else 'N/A'} to {datetime.fromtimestamp(max_ts) if max_ts else 'N/A'}")
+
+            except Exception as e:
+                print(f"[SYNC ERROR] {e}")
+                import traceback
+                traceback.print_exc()
+                sync_state['status'] = 'error'
+                sync_state['error'] = str(e)
+
+        sync_thread = threading.Thread(target=background_sync)
+        sync_thread.start()
+
+        return jsonify({'success': True, 'total_requested': max_emails})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fetch/status', methods=['GET'])
+def api_fetch_status():
+    """Get current sync status."""
+    return jsonify(sync_state)
+
+@app.route('/api/fetch/stop', methods=['POST'])
+def api_stop_sync():
+    """Stop the current sync process."""
+    sync_stop_event.set()
+    return jsonify({'success': True})
 
 
 @app.route('/api/emails')
@@ -537,43 +734,129 @@ def api_get_emails_by_category():
 
 @app.route('/api/summarize', methods=['POST'])
 def api_summarize():
-    """Get AI summary for an email or group of emails."""
+    """Generate AI summary using Ollama."""
     if not is_authenticated():
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
         data = request.json or {}
-        email_id = data.get('email_id')
+        category = data.get('category')
         sender_email = data.get('sender_email')
+        email_id = data.get('email_id')
+        
+        client = get_ollama_client()
+        if not client.is_available():
+            return jsonify({'error': 'AI Service (Ollama) is not available'}), 503
 
-        if email_id:
-            # Summarize single email
+        summary = ""
+        result = {}
+
+        if category:
+            # Let's use get_all_emails and filter for simplicity for now
+            all_emails = db.get_all_emails() # Returns Email objects
+            cat_emails = [e for e in all_emails if e.category and e.category.value == category]
+            
+            # Convert to dicts for Ollama
+            email_dicts = [{
+                'sender': e.sender,
+                'subject': e.subject,
+                'snippet': e.snippet
+            } for e in cat_emails[:50]] # Limit to 50 recent
+            
+            summary = client.summarize_category(category, email_dicts)
+            result = {'summary': summary}
+
+        elif sender_email:
+            emails = db.get_emails_by_sender(sender_email)
+            email_dicts = [{
+                'subject': e.subject,
+                'snippet': e.snippet
+            } for e in emails[:20]]
+            
+            summary = client.summarize_sender_emails(sender_email, email_dicts)
+            result = {'summary': summary}
+
+        elif email_id:
             email = db.get_email(email_id)
             if not email:
                 return jsonify({'error': 'Email not found'}), 404
+            
+            review = client.review_uncertain_email(
+                subject=email.subject,
+                sender=email.sender,
+                snippet=email.snippet
+            )
+            result = review
 
-            summary = summarizer.summarize_email(email)
-            email.ai_summary = summary
-            db.save_email(email)
+        else:
+            return jsonify({'error': 'Missing category, sender_email, or email_id'}), 400
 
-            return jsonify({'summary': summary})
-
-        elif sender_email:
-            # Summarize all emails from sender
-            emails = db.get_emails_by_sender(sender_email)
-            if not emails:
-                return jsonify({'error': 'No emails from sender'}), 404
-
-            summary = summarizer.summarize_sender_batch(emails, sender_email)
-
-            return jsonify({
-                'summary': summary,
-                'email_count': len(emails)
-            })
-
-        return jsonify({'error': 'email_id or sender_email required'}), 400
+        return jsonify(result)
 
     except Exception as e:
+        print(f"Summarize Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/suggestions/deletion', methods=['POST'])
+def api_suggest_deletions():
+    """Get AI suggestions for deletion from clutter categories."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        # Gather candidates from clutter categories
+        categories = ['spam', 'ads', 'promotions', 'uncertain']
+        candidates = []
+        seen_ids = set()
+        
+        for cat in categories:
+            # Get recent emails
+            emails = db.get_emails_by_category(cat)
+            sorted_emails = sorted(emails, key=lambda x: x.date.timestamp() if x.date else 0, reverse=True)
+            
+            for e in sorted_emails[:15]: # Take top 15 from each
+                if e.id not in seen_ids:
+                    candidates.append(e)
+                    seen_ids.add(e.id)
+        
+        if not candidates:
+             return jsonify({'suggestions': [], 'count': 0, 'message': 'No clutter emails found'})
+
+        # Convert to dicts
+        email_dicts = [{
+            'id': e.id,
+            'sender': e.sender,
+            'subject': e.subject,
+            'snippet': e.snippet
+        } for e in candidates]
+        
+        client = get_ollama_client()
+        if not client.is_available():
+             return jsonify({'error': 'AI Service unavailable'}), 503
+             
+        delete_ids = client.suggest_deletions(email_dicts)
+        
+        # Hydrate suggestions with details
+        suggestion_details = []
+        for e in candidates:
+            if e.id in delete_ids:
+                suggestion_details.append({
+                    'id': e.id,
+                    'sender': e.sender or e.sender_email,
+                    'subject': e.subject,
+                    'snippet': e.snippet,
+                    'category': e.category.value if e.category else 'unknown',
+                    'date': e.date.isoformat() if e.date else None
+                })
+        
+        return jsonify({
+            'suggestions': suggestion_details,
+            'count': len(suggestion_details)
+        })
+
+    except Exception as e:
+        print(f"Suggestion Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -744,6 +1027,9 @@ def api_submit_feedback():
         return jsonify({'error': str(e)}), 500
 
 
+from ollama_client import get_ollama_client
+import time # Added for time.sleep in the new api_train_model
+
 @app.route('/api/train', methods=['POST'])
 def api_train_model():
     """Trigger model retraining from user feedback."""
@@ -752,13 +1038,12 @@ def api_train_model():
 
     try:
         success = categorizer.train_from_database(db)
-
-        return jsonify({
-            'success': success,
-            'message': 'Model retrained successfully' if success else 'Training failed or insufficient data'
-        })
-
+        if success:
+             return jsonify({'success': True, 'message': 'Model retrained successfully with latest feedback.'})
+        else:
+             return jsonify({'success': False, 'message': 'Not enough Training Data (need >10 labeled emails). Keep categorizing!'}), 400
     except Exception as e:
+        print(f"Training Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -803,7 +1088,125 @@ def api_stats():
         return jsonify({'error': str(e)}), 500
 
 
+# ============== AI-Powered Summary Endpoints ==============
+
+@app.route('/api/ai/status')
+def api_ai_status():
+    """Check if local AI (Ollama) is available."""
+    try:
+        from ollama_client import get_ollama_client
+        client = get_ollama_client()
+        return jsonify({
+            'available': client.is_available(),
+            'model_ready': client.has_model(),
+            'model': client.model
+        })
+    except Exception as e:
+        return jsonify({
+            'available': False,
+            'model_ready': False,
+            'error': str(e)
+        })
+
+
+
+
+
+@app.route('/api/ai/summarize/sender', methods=['POST'])
+def api_ai_summarize_sender():
+    """Get AI summary for all emails from a sender."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        from ollama_client import get_ollama_client
+        
+        data = request.json or {}
+        sender_email = data.get('sender_email')
+        
+        if not sender_email:
+            return jsonify({'error': 'sender_email required'}), 400
+        
+        # Get emails from this sender
+        emails = db.get_emails_by_sender(sender_email)
+        if not emails:
+            return jsonify({'error': f'No emails from sender: {sender_email}'}), 404
+        
+        # Convert to dicts for the AI
+        email_dicts = [
+            {
+                'subject': e.subject,
+                'snippet': e.snippet
+            }
+            for e in emails
+        ]
+        
+        # Get sender name
+        sender_name = emails[0].sender_name or sender_email
+        
+        # Get AI summary
+        client = get_ollama_client()
+        if not client.is_available():
+            return jsonify({'error': 'AI service not available', 'fallback': True}), 503
+        
+        summary = client.summarize_sender_emails(sender_name, email_dicts)
+        
+        return jsonify({
+            'sender': sender_email,
+            'sender_name': sender_name,
+            'email_count': len(emails),
+            'summary': summary
+        })
+        
+    except Exception as e:
+        print(f"[AI ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/ai/review/uncertain', methods=['POST'])
+def api_ai_review_uncertain():
+    """Get AI review for an uncertain email."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        from ollama_client import get_ollama_client
+        
+        data = request.json or {}
+        email_id = data.get('email_id')
+        
+        if not email_id:
+            return jsonify({'error': 'email_id required'}), 400
+        
+        # Get the email
+        email = db.get_email(email_id)
+        if not email:
+            return jsonify({'error': 'Email not found'}), 404
+        
+        # Get AI review
+        client = get_ollama_client()
+        if not client.is_available():
+            return jsonify({'error': 'AI service not available', 'fallback': True}), 503
+        
+        review = client.review_uncertain_email(
+            email.subject, 
+            email.sender_name or email.sender_email,
+            email.snippet
+        )
+        
+        return jsonify({
+            'email_id': email_id,
+            'current_category': email.category,
+            'review': review
+        })
+        
+    except Exception as e:
+        print(f"[AI ERROR] {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 def create_app():
+
     """Create and configure the Flask app."""
     # Create template and static directories
     templates_dir = Path(__file__).parent / 'templates'
@@ -823,6 +1226,57 @@ FLASK_SECRET_KEY=change-this-in-production
 """)
 
     return app
+
+
+
+
+# Helper to get DB connection
+def get_db():
+    global db
+    if db is None:
+        init_services()
+    return db
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    """Get all settings."""
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    database = get_db()
+    # Default settings
+    settings = {
+        'theme': database.get_setting('theme', 'dark'),
+        'accent_color': database.get_setting('accent_color', '#4fd1c5'),
+        'gemini_api_key': database.get_setting('gemini_api_key', '')
+    }
+    return jsonify(settings)
+
+@app.route('/api/settings', methods=['POST'])
+def save_settings():
+    """Save settings."""
+    if not is_authenticated():
+        return jsonify({'error': 'Unauthorized'}), 401
+    
+    data = request.json or {}
+    database = get_db()
+    
+    # Save valid settings
+    valid_keys = ['theme', 'accent_color', 'gemini_api_key']
+    for key in valid_keys:
+        if key in data:
+            database.set_setting(key, data[key])
+            
+            # Special handling for API key
+            if key == 'gemini_api_key':
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=data[key])
+                except:
+                    pass
+
+    return jsonify({'success': True})
+
 
 
 if __name__ == '__main__':

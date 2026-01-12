@@ -146,6 +146,12 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_emails_category ON emails(category);
                 CREATE INDEX IF NOT EXISTS idx_emails_date ON emails(date);
                 CREATE INDEX IF NOT EXISTS idx_feedback_sender ON user_feedback(sender_email);
+
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
             """)
 
     def save_email(self, email: Email):
@@ -353,4 +359,17 @@ class Database:
                 DELETE FROM user_feedback;
                 DELETE FROM sender_stats;
                 DELETE FROM unsubscribe_log;
+                DELETE FROM settings;
             """)
+
+    def get_setting(self, key: str, default: str = None) -> Optional[str]:
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else default
+
+    def set_setting(self, key: str, value: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+            """, (key, value, datetime.now().isoformat()))

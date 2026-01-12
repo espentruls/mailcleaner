@@ -166,7 +166,7 @@ class GmailClient:
         Gmail API supports batch requests of up to 100 calls, but we limit to 50 for safety.
         """
         messages = []
-        batch_size = 50
+        batch_size = 15  # Reduced from 50 to avoid 429 Rate Limit errors
 
         for i in range(0, len(msg_ids), batch_size):
             batch_ids = msg_ids[i:i + batch_size]
@@ -394,7 +394,7 @@ class GmailClient:
             return False
 
     def fetch_all_emails(self, query: str = "", max_emails: int = 1000,
-                        callback=None) -> List[Email]:
+                        callback=None, stop_event=None) -> List[Email]:
         """
         Fetch all emails matching query with progress callback.
         Callback receives (current_count, total_estimate).
@@ -404,6 +404,11 @@ class GmailClient:
         total_fetched = 0
 
         while total_fetched < max_emails:
+            # Check if stop was requested
+            if stop_event and stop_event.is_set():
+                print("Sync stopped by user")
+                break
+
             messages, next_token = self.list_messages(
                 query=query,
                 max_results=min(500, max_emails - total_fetched),
@@ -418,6 +423,8 @@ class GmailClient:
             detailed_messages = self.get_messages_batch(msg_ids, format='metadata')
 
             for msg in detailed_messages:
+                if stop_event and stop_event.is_set():
+                    break
                 try:
                     email_obj = self.parse_message(msg)
                     all_emails.append(email_obj)

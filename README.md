@@ -18,10 +18,13 @@
 ## Features
 
 - **AI Categorization** - Automatically sorts emails into: Important, Personal, Newsletter, Promotions, Social, Ads, Spam
+- **Local AI (Ollama)** - Built-in Privacy-First AI for summaries and cleanup (Runs offline!)
+- **AI Cleanup** - Identifies and suggests deletion for bulk spam/ads
+- **Feedback Loop** - Train the model by correcting categories
 - **Bulk Actions** - Delete spam and promotional emails in one click
 - **Smart Unsubscribe** - One-click unsubscribe from newsletters
 - **Sender Analysis** - See who sends you the most email
-- **Privacy First** - Runs locally, your data never leaves your machine
+- **Privacy First** - Your data never leaves your machine (Local DB + Local AI)
 
 ---
 
@@ -92,13 +95,18 @@ services:
 
 ---
 
-## Optional: Gemini AI
+## Local AI (Ollama)
 
-For enhanced email summaries, add your Gemini API key during onboarding or:
+This application now comes with **Ollama** built-in, running the `qwen2.5:3b` model locally.
 
-```bash
-echo "GEMINI_API_KEY=your_key" >> data/.env
-```
+- **No API Key Required**: All processing happens on your device.
+- **Privacy**: No email data is sent to external cloud providers for AI processing.
+- **Requirements**: Allocates ~2-4GB RAM for the model.
+
+### AI Features:
+1.  **Summarization**: Click "Ask AI" on any email.
+2.  **AI Cleanup**: Scan your inbox for junk (Spam/Ads) and delete in bulk.
+3.  **Training**: Correct email categories to train the model over time.
 
 ---
 

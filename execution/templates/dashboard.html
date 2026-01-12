@@ -24,8 +24,16 @@
                 <span>By Sender</span>
             </a>
             <a href="#" class="nav-item" data-view="uncertain">
-                <i class="ri-question-line"></i>
-                <span>Review</span>
+                <i class="ri-question-mark"></i>
+                <span>Uncertain</span>
+            </a>
+            <a href="#" class="nav-item" data-view="cleanup">
+                <i class="ri-sparkling-line"></i>
+                <span>AI Cleanup</span>
+            </a>
+            <a href="#" class="nav-item" data-view="settings">
+                <i class="ri-settings-3-line"></i>
+                <span>Settings</span>
             </a>
         </nav>
 
@@ -46,12 +54,42 @@
             </div>
             <div class="header-right">
                 <div class="filter-group">
-                    <select id="read-filter" class="filter-select">
-                        <option value="all">All Emails</option>
-                        <option value="unread">Unread Only</option>
-                        <option value="read">Read Only</option>
-                    </select>
+                    <div class="custom-dropdown" id="filter-dropdown">
+                        <button class="dropdown-trigger" type="button">
+                            <span class="dropdown-icon">📧</span>
+                            <span class="dropdown-text">All Emails</span>
+                            <span class="dropdown-text-short">All</span>
+                            <i class="ri-arrow-down-s-line dropdown-arrow"></i>
+                        </button>
+                        <div class="dropdown-menu">
+                            <div class="dropdown-option active" data-value="all" data-icon="📧" data-text="All Emails"
+                                data-short="All">
+                                <span class="option-icon">📧</span>
+                                <span class="option-text">All Emails</span>
+                                <span class="option-text-short">All</span>
+                                <i class="ri-check-line option-check"></i>
+                            </div>
+                            <div class="dropdown-option" data-value="unread" data-icon="📬" data-text="Unread Only"
+                                data-short="Unread">
+                                <span class="option-icon">📬</span>
+                                <span class="option-text">Unread Only</span>
+                                <span class="option-text-short">Unread</span>
+                                <i class="ri-check-line option-check"></i>
+                            </div>
+                            <div class="dropdown-option" data-value="read" data-icon="📭" data-text="Read Only"
+                                data-short="Read">
+                                <span class="option-icon">📭</span>
+                                <span class="option-text">Read Only</span>
+                                <span class="option-text-short">Read</span>
+                                <i class="ri-check-line option-check"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Hidden input for form compatibility -->
+                    <input type="hidden" id="read-filter" value="all">
                 </div>
+
+
                 <button class="btn btn-primary" id="fetch-btn">
                     <i class="ri-refresh-line"></i>
                     Fetch Emails
@@ -86,7 +124,7 @@
                     </div>
                     <div class="stat-info">
                         <span class="stat-value" id="deletable">0</span>
-                        <span class="stat-label">Can Delete</span>
+                        <span class="stat-label">Deletable</span>
                     </div>
                 </div>
                 <div class="stat-card">
@@ -141,10 +179,28 @@
             <div class="category-tabs" id="category-tabs">
                 <!-- Category tabs -->
             </div>
+
+            <!-- AI Summary Panel -->
+            <div class="ai-summary-panel" id="category-summary-panel" style="display: none;">
+                <div class="ai-summary-header">
+                    <div class="ai-summary-title">
+                        <i class="ri-magic-line"></i>
+                        <span>AI Summary</span>
+                    </div>
+                    <button class="ai-summary-close" onclick="closeCategorySummary()">
+                        <i class="ri-close-line"></i>
+                    </button>
+                </div>
+                <div class="ai-summary-content" id="category-summary-content">
+                    <!-- AI summary will appear here -->
+                </div>
+            </div>
+
             <div class="email-list" id="category-emails">
                 <!-- Emails by category -->
             </div>
         </div>
+
 
         <!-- Senders View -->
         <div id="senders-view" class="view">
@@ -162,54 +218,193 @@
                 <!-- Uncertain emails -->
             </div>
         </div>
-    </main>
 
-    <!-- Email Detail Modal -->
-    <div id="email-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="modal-subject">Email Subject</h3>
-                <button class="modal-close" onclick="closeModal()">
-                    <i class="ri-close-line"></i>
-                </button>
+        <!-- Settings View -->
+        <div id="settings-view" class="view">
+            <div class="settings-header">
+                <h2>Settings</h2>
             </div>
-            <div class="modal-body">
-                <div class="email-meta">
-                    <span id="modal-sender"></span>
-                    <span id="modal-date"></span>
+
+            <div class="settings-container">
+                <!-- Appearance -->
+                <div class="form-group setting-row">
+                    <label class="setting-label">Theme</label>
+                    <button id="theme-btn" class="btn btn-primary theme-btn">
+                        <i class="ri-moon-line"></i>
+                        <span>Dark Mode</span>
+                    </button>
                 </div>
-                <div class="email-summary" id="modal-summary">
-                    <i class="ri-robot-line"></i>
-                    <span>Loading AI summary...</span>
+
+                <div class="form-group setting-row">
+                    <label class="setting-label">Accent Color</label>
+                    <div class="color-picker-simple">
+                        <input type="color" id="accent-color" value="#4fd1c5">
+                    </div>
                 </div>
-                <div class="email-preview" id="modal-preview"></div>
+
+                <div class="form-group setting-col">
+                    <label class="setting-label">Gemini API Key</label>
+                    <div class="api-input-wrapper">
+                        <div class="api-key-input-group">
+                            <input type="password" id="gemini-key" placeholder="Enter API Key"
+                                class="refined-input api-key-field">
+                            <button class="btn btn-icon-only remove-key-btn" id="remove-key-btn" title="Remove API Key">
+                                <i class="ri-delete-bin-line"></i>
+                            </button>
+                        </div>
+                        <button type="button" id="toggle-key" class="btn btn-icon" title="Show/Hide">
+                            <i class="ri-eye-line"></i>
+                        </button>
+                        <button type="button" id="save-api-btn" class="btn btn-primary">
+                            Save Key
+                        </button>
+                    </div>
+                </div>
+
+
             </div>
-            <div class="modal-actions">
-                <button class="btn btn-success" onclick="markKeep()">
-                    <i class="ri-check-line"></i>
-                    Keep
-                </button>
-                <button class="btn btn-danger" onclick="markDelete()">
+
+            <div class="form-group setting-row"
+                style="margin-top: 2rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <label class="setting-label">Local AI Training</label>
+                <div style="flex: 1;">
+                    <p style="font-size: 0.9em; color: var(--text-muted); margin-bottom: 0.5rem;">
+                        Improve classification by training the model on your corrected emails.
+                    </p>
+                    <button class="btn btn-primary" onclick="trainModel()">
+                        <i class="ri-brain-line"></i>
+                        Train Model Now
+                    </button>
+                </div>
+            </div>
+
+
+            <!-- Danger Zone -->
+            <div class="danger-zone-section"
+                style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+                <label class="setting-label" style="color: var(--danger); display: block; margin-bottom: 8px;">Danger
+                    Zone</label>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Deleting your credentials will log you out and require a fresh setup.
+                    Your local email cache will remain, but you won't be able to fetch new emails.
+                </p>
+                <button id="reset-account-btn" class="btn btn-danger" style="width: 100%;">
                     <i class="ri-delete-bin-line"></i>
-                    Delete
-                </button>
-                <button class="btn btn-warning" id="modal-unsubscribe" onclick="unsubscribe()">
-                    <i class="ri-mail-close-line"></i>
-                    Unsubscribe
+                    Reset Account & Delete Credentials
                 </button>
             </div>
         </div>
-    </div>
+</div>
 
-    <!-- Loading Overlay -->
-    <div id="loading-overlay" class="loading-overlay">
-        <div class="loading-spinner">
-            <i class="ri-loader-4-line"></i>
-            <span id="loading-text">Loading...</span>
+<!-- AI Cleanup View -->
+<div id="cleanup-view" class="view">
+    <div class="section-header">
+        <h2>AI Cleanup Suggestions</h2>
+        <button class="btn btn-primary" onclick="loadCleanupSuggestions()">
+            <i class="ri-refresh-line"></i> Refresh Suggestions
+        </button>
+    </div>
+    <div id="cleanup-intro" class="glass-panel" style="margin-bottom: 2rem; padding: 2rem; text-align: center;">
+        <i class="ri-robot-line" style="font-size: 3rem; color: var(--primary-color);"></i>
+        <h3>Let AI Clean Your Inbox</h3>
+        <p>The AI will scan your "Uncertain" and promotional emails to identify junk.</p>
+        <button class="btn btn-primary btn-lg" style="margin-top: 1rem;" onclick="loadCleanupSuggestions()">
+            Start Scan
+        </button>
+    </div>
+    <div id="cleanup-loading" style="display:none; text-align:center; padding:4rem;">
+        <i class="ri-loader-4-line spin" style="font-size:3rem; color: var(--primary-color);"></i>
+        <p style="margin-top: 1rem;">Analyzing emails with Local LLM...</p>
+    </div>
+    <div id="cleanup-results" class="email-list"></div>
+</div>
+
+
+<!-- Email Detail Modal -->
+<div id="email-modal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-subject">Email Subject</h3>
+            <button class="modal-close" onclick="closeModal()">
+                <i class="ri-close-line"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="email-meta">
+                <span id="modal-sender"></span>
+                <span id="modal-date"></span>
+                <select id="modal-category-select" class="form-select" onchange="changeCategory(this.value)"
+                    style="margin-left: auto; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-color);">
+                    <option value="spam">Spam</option>
+                    <option value="newsletter">Newsletter</option>
+                    <option value="ads">Ads</option>
+                    <option value="social">Social</option>
+                    <option value="promotions">Promotions</option>
+                    <option value="important">Important</option>
+                    <option value="personal">Personal</option>
+                    <option value="uncertain">Uncertain</option>
+                </select>
+            </div>
+            <div class="email-summary" id="modal-summary">
+                <i class="ri-robot-line"></i>
+                <span>Loading AI summary...</span>
+            </div>
+            <div class="email-preview" id="modal-preview"></div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-success" onclick="markKeep()">
+                <i class="ri-check-line"></i>
+                Keep
+            </button>
+            <button class="btn btn-danger" onclick="markDelete()">
+                <i class="ri-delete-bin-line"></i>
+                Delete
+            </button>
+            <button class="btn btn-warning" id="modal-unsubscribe" onclick="unsubscribe()">
+                <i class="ri-mail-close-line"></i>
+                Unsubscribe
+            </button>
+            <button class="btn btn-primary" onclick="askAI()">
+                <i class="ri-sparkling-fill"></i>
+                Ask AI
+            </button>
         </div>
     </div>
+</div>
 
-    <!-- Toast Notifications -->
-    <div id="toast-container" class="toast-container"></div>
+<!-- AI Summary Modal -->
+<div id="ai-modal" class="modal">
+    <div class="modal-content glass-panel" style="max-width: 800px;">
+        <span class="close-btn" onclick="closeAIModal()">&times;</span>
+        <h2 id="ai-modal-title" style="margin-bottom: 1rem;"><i class="ri-sparkling-fill gradient-text"></i> AI
+            Analysis</h2>
+        <div id="ai-modal-body" class="markdown-body" style="line-height: 1.6;">
+            <!-- Content -->
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay" class="loading-overlay">
+    <div class="loading-spinner">
+        <i class="ri-loader-4-line" id="loading-icon"></i>
+        <span id="loading-text">Syncing Emails...</span>
+
+        <div id="sync-progress-container" class="progress-container" style="display: none;">
+            <div class="progress-bar-wrapper">
+                <div id="sync-progress-bar" class="progress-bar-fill"></div>
+            </div>
+            <div class="progress-stats">
+                <span id="sync-count">0 / 0</span>
+                <span id="sync-percent">0%</span>
+            </div>
+        </div>
+
+        <button id="stop-sync-btn" class="btn btn-danger btn-sm" style="display: none;">Stop Sync</button>
+    </div>
+</div>
+
+<!-- Toast Notifications -->
+<div id="toast-container" class="toast-container"></div>
 </div>
 {% endblock %}

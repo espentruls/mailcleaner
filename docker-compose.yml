@@ -8,15 +8,28 @@ services:
     container_name: mailcleaner
     ports:
       - "5000:5000"
+      - "11434:11434"  # Ollama API (optional, for external access)
     volumes:
       # Mount data directory for all persistent files (db, credentials, tokens)
       - ./data:/app/data
+      # Persist Ollama models (prevents re-download on rebuild)
+      - ollama_models:/root/.ollama
     environment:
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-mailcleaner-docker-secret}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - PYTHONUNBUFFERED=1
       - OAUTHLIB_INSECURE_TRANSPORT=1
       - DOCKER_CONTAINER=1
+      - OLLAMA_HOST=http://127.0.0.1:11434
     restart: unless-stopped
-    # For OAuth flow, we need to be able to open browser
-    # On Windows/Mac, this works automatically through port mapping
+    # Increased memory for AI model
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 4G
+
+volumes:
+  ollama_models:
+    name: mailcleaner_ollama_models

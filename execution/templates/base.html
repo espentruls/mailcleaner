@@ -21,6 +21,21 @@
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     {% block extra_js %}{% endblock %}
+
+    <script>
+        // Apply persisted settings
+        (async () => {
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+                if (settings.accent_color) {
+                    document.documentElement.style.setProperty('--primary', settings.accent_color);
+                }
+            } catch (e) {
+                console.error('Failed to load theme settings:', e);
+            }
+        })();
+    </script>
 </body>
 
 </html>

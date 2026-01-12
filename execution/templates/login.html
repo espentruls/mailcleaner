@@ -29,10 +29,19 @@
             </div>
         </div>
 
-        <a href="{{ url_for('login') }}" class="login-btn">
-            <i class="ri-google-fill"></i>
-            Sign in with Google
-        </a>
+        <div class="login-actions">
+            {% if needs_setup %}
+            <a href="{{ url_for('onboarding') }}" class="btn btn-primary btn-lg">
+                <i class="ri-settings-4-line"></i>
+                <span>Start Setup</span>
+            </a>
+            {% else %}
+            <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg">
+                <i class="ri-google-fill"></i>
+                <span>Login with Google</span>
+            </a>
+            {% endif %}
+        </div>
 
         <p class="disclaimer">
             We only request necessary permissions to read, categorize, and manage your emails.

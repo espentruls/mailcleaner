@@ -137,7 +137,8 @@
                     </div>
                     <div class="checklist-content">
                         <p>Select <strong>External</strong>, enter app name "MailCleaner" and your email. Go to
-                            <strong>Audience</strong> and add yourself as a <strong>Test User</strong>.</p>
+                            <strong>Audience</strong> and add yourself as a <strong>Test User</strong>.
+                        </p>
                         <a href="https://console.cloud.google.com/auth/overview" target="_blank"
                             class="btn btn-secondary">
                             <i class="ri-external-link-line"></i> Configure Consent
@@ -159,9 +160,16 @@
                         <i class="ri-arrow-down-s-line toggle-icon"></i>
                     </div>
                     <div class="checklist-content">
-                        <p>Select <strong>Web application</strong>, name it "MailCleaner", add redirect URI:
-                            <code>http://localhost:5000/auth/callback</code>, click Create, then <strong>Download
-                                JSON</strong>.</p>
+                        <p>Select <strong>Web application</strong>, name it "MailCleaner", then add this
+                            <strong>Authorized redirect URI</strong>:
+                        </p>
+                        <div class="copy-box">
+                            <code id="redirect-uri">{{ base_url }}/auth/callback</code>
+                            <button class="btn btn-icon btn-sm" onclick="copyRedirectURI()" title="Copy to clipboard">
+                                <i class="ri-file-copy-line" id="copy-icon"></i>
+                            </button>
+                        </div>
+                        <p style="margin-top: 12px;">Click Create, then <strong>Download JSON</strong>.</p>
                         <a href="https://console.cloud.google.com/auth/clients" target="_blank"
                             class="btn btn-secondary">
                             <i class="ri-external-link-line"></i> Create Credentials
@@ -410,6 +418,17 @@
             statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Failed to save key.';
             statusEl.className = 'upload-status error';
         }
+    }
+
+    function copyRedirectURI() {
+        const uri = document.getElementById('redirect-uri').textContent;
+        navigator.clipboard.writeText(uri).then(() => {
+            const icon = document.getElementById('copy-icon');
+            icon.className = 'ri-check-line';
+            setTimeout(() => {
+                icon.className = 'ri-file-copy-line';
+            }, 2000);
+        });
     }
 
     function toggleKeyVisibility() {
