@@ -136,6 +136,23 @@ def before_request():
         except Exception as e:
             print(f"Error initializing services: {e}")
 
+# Performance Timing Decorator
+import time
+from functools import wraps
+
+def time_execution(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        start_time = time.time()
+        response = f(*args, **kwargs)
+        duration = time.time() - start_time
+        if duration > 0.5:
+             print(f"[SLOW] {request.method} {request.path} took {duration:.3f}s")
+        else:
+             print(f"[TIMING] {request.method} {request.path} took {duration:.3f}s")
+        return response
+    return decorated_function
+
 
 @app.route('/')
 def index():
@@ -145,7 +162,32 @@ def index():
     if not is_authenticated():
         return render_template('login.html', needs_setup=not setup_ok)
 
-    return render_template('dashboard.html')
+    # SSR: Inject stats directly for instant load
+    stats = {}
+    try:
+        if cached_data:
+            stats = json.loads(cached_data)
+            
+            # Self-healing: If cache is inconsistent (emails exist but no senders), force refresh
+            if stats.get('total_emails', 0) > 0 and stats.get('total_senders', 0) == 0:
+                print("[SSR] Cache inconsistent (0 senders). Healing...")
+                db.refresh_all_stats()
+                stats = json.loads(db.get_setting('dashboard_cache'))
+        else:
+            # Fallback for first run
+            print("[SSR] No cache found, generating stats...")
+            # We must refresh ALL stats to ensure sender_stats table is populated
+            db.refresh_all_stats()
+            # Now fetch the freshly generated cache
+            cached_data = db.get_setting('dashboard_cache')
+            if cached_data:
+                stats = json.loads(cached_data)
+    except Exception as e:
+        print(f"SSR Error: {e}")
+        # Default empty stats to prevent 500
+        stats = {}
+
+    return render_template('dashboard.html', stats=stats)
 
 
 @app.route('/setup')
@@ -211,36 +253,6 @@ def api_setup_credentials():
         return jsonify({'success': False, 'error': 'Invalid JSON file'}), 400
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
-
-
-@app.route('/api/setup/gemini', methods=['POST'])
-def api_setup_gemini():
-    """Save and validate Gemini API key."""
-    data = request.json or {}
-    api_key = data.get('api_key', '').strip()
-
-    if not api_key:
-        return jsonify({'success': False, 'error': 'No API key provided'}), 400
-
-    # Validate the key by making a test request
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content("Say 'OK' if you can hear me.")
-
-        if not response.text:
-            return jsonify({'success': False, 'error': 'Invalid API key'}), 400
-
-    except Exception as e:
-        error_msg = str(e)
-        if 'API_KEY_INVALID' in error_msg or 'invalid' in error_msg.lower():
-            return jsonify({'success': False, 'error': 'Invalid API key. Please check and try again.'}), 400
-        elif 'quota' in error_msg.lower():
-            # Key is valid but quota exceeded - still save it
-            pass
-        else:
-            return jsonify({'success': False, 'error': f'API error: {error_msg}'}), 400
 
     # Save to .env file
     try:
@@ -587,6 +599,9 @@ def api_fetch_emails():
                     print("[SYNC] Sync was stopped by user")
                 else:
                     sync_state['status'] = 'completed'
+                    # Refresh cached stats
+                    print("[SYNC] Refreshing all statistics caches...")
+                    db.refresh_all_stats()
                     
                 sync_state['current'] = current_count
                 print(f"[SYNC] Sync finished with status: {sync_state['status']}")
@@ -630,14 +645,16 @@ def api_get_emails():
         category = request.args.get('category')
         sender = request.args.get('sender')
         read_filter = request.args.get('read_filter', 'all')
-        limit = min(int(request.args.get('limit', 500)), 1000)
+        limit = min(int(request.args.get('limit', 50)), 100) # Default 50, Max 100 per page
+        page = int(request.args.get('page', 1))
+        offset = (page - 1) * limit
 
         if sender:
-            emails = db.get_emails_by_sender(sender)
+            emails = db.get_emails_by_sender(sender, limit=limit, offset=offset)
         elif category:
-            emails = db.get_emails_by_category(EmailCategory(category))
+            emails = db.get_emails_by_category(EmailCategory(category), limit=limit, offset=offset)
         else:
-            emails = db.get_all_emails(read_filter=read_filter, limit=limit)
+            emails = db.get_all_emails(read_filter=read_filter, limit=limit, offset=offset)
 
         return jsonify({
             'emails': [e.to_dict() for e in emails],
@@ -648,9 +665,24 @@ def api_get_emails():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/senders/top')
+def api_get_top_senders():
+    """Get top senders directly from DB aggregation."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        limit = min(int(request.args.get('limit', 50)), 200)
+        senders = db.get_top_sender_groups(limit=limit)
+        return jsonify(senders)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/emails/grouped')
 def api_get_emails_grouped():
-    """Get emails grouped by sender with stats."""
+    """DEPRECATED: Use /api/senders/top instead."""
+    # Keeping for compatibility but warning
     if not is_authenticated():
         return jsonify({'error': 'Not authenticated'}), 401
 
@@ -715,16 +747,26 @@ def api_get_emails_by_category():
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
+        # Optimized: Use SQL aggregation instead of fetching emails
+        # This returns {category_name: {'count': X, 'unread': Y}}
         stats = db.get_category_stats()
+        
+        # Ensure all categories are present, even if empty
         result = {}
-
         for category in EmailCategory:
-            cat_emails = db.get_emails_by_category(category)
-            result[category.value] = {
-                'count': len(cat_emails),
-                'unread': sum(1 for e in cat_emails if not e.is_read),
-                'emails': [e.to_dict() for e in cat_emails[:50]]  # Limit preview
-            }
+            cat_value = category.value
+            if cat_value in stats:
+                result[cat_value] = {
+                    'count': stats[cat_value]['count'],
+                    'unread': stats[cat_value]['unread'],
+                    'emails': [] # Frontend fetches these on demand
+                }
+            else:
+                result[cat_value] = {
+                    'count': 0,
+                    'unread': 0,
+                    'emails': []
+                }
 
         return jsonify(result)
 
@@ -798,6 +840,47 @@ def api_summarize():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/analyze/subscriptions', methods=['POST'])
+def api_analyze_subscriptions():
+    """Analyze subscriptions and return recommendations."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        data = request.json or {}
+        # List of {sender_email, sender, total, unread}
+        candidates = data.get('candidates', [])
+        
+        client = get_ollama_client()
+        if not client.is_available():
+            return jsonify({'error': 'AI Service (Ollama) is not available'}), 503
+
+        results = {}
+        
+        # Limit to top 5 to avoid timeouts during demo
+        for cand in candidates[:5]:
+            sender_email = cand.get('sender_email')
+            if not sender_email: continue
+
+            # Get recent subjects for context
+            recent_emails = db.get_emails_by_sender(sender_email)
+            subjects = [e.subject for e in recent_emails[:5]]
+            
+            analysis = client.analyze_subscription_value(
+                sender=cand.get('sender', 'Unknown'),
+                stats={'total': cand.get('count', 0), 'unread': cand.get('unread_count', 0)},
+                recent_subjects=subjects
+            )
+            
+            results[sender_email] = analysis
+
+        return jsonify(results)
+
+    except Exception as e:
+        print(f"Analysis Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/suggestions/deletion', methods=['POST'])
 def api_suggest_deletions():
     """Get AI suggestions for deletion from clutter categories."""
@@ -811,14 +894,24 @@ def api_suggest_deletions():
         seen_ids = set()
         
         for cat in categories:
-            # Get recent emails
-            emails = db.get_emails_by_category(cat)
-            sorted_emails = sorted(emails, key=lambda x: x.date.timestamp() if x.date else 0, reverse=True)
+            # Get recent emails (convert string to EmailCategory enum)
+            try:
+                cat_enum = EmailCategory(cat)
+                # Optimization: Limit fetch to 20 per category and trust SQL ordering
+                emails = db.get_emails_by_category(cat_enum, limit=20)
+            except ValueError:
+                continue  # Skip invalid categories
             
-            for e in sorted_emails[:15]: # Take top 15 from each
+            # Take top 5 from each category to build a diverse batch of max 20
+            # Trusting DB 'ORDER BY date DESC'
+            for e in emails[:5]: 
                 if e.id not in seen_ids:
                     candidates.append(e)
                     seen_ids.add(e.id)
+            
+            # Use a hard limit for AI processing to prevent timeouts
+            if len(candidates) >= 20:
+                break
         
         if not candidates:
              return jsonify({'suggestions': [], 'count': 0, 'message': 'No clutter emails found'})
@@ -844,10 +937,12 @@ def api_suggest_deletions():
                 suggestion_details.append({
                     'id': e.id,
                     'sender': e.sender or e.sender_email,
+                    'sender_email': e.sender_email,
                     'subject': e.subject,
                     'snippet': e.snippet,
                     'category': e.category.value if e.category else 'unknown',
-                    'date': e.date.isoformat() if e.date else None
+                    'date': e.date.isoformat() if e.date else None,
+                    'is_read': e.is_read
                 })
         
         return jsonify({
@@ -877,6 +972,9 @@ def api_delete_emails():
         success, failure = gmail_client.delete_messages_batch(email_ids, permanent=permanent)
         db.mark_emails_deleted(email_ids)
 
+        # Update dashboard cache in background
+        trigger_background_refresh()
+
         return jsonify({
             'success': success,
             'failure': failure,
@@ -885,6 +983,49 @@ def api_delete_emails():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/emails/<email_id>', methods=['DELETE'])
+def api_delete_single_email(email_id):
+    """Delete a single email."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+         print(f"[DELETE DEBUG] Deleting email {email_id}...")
+         
+         # Ensure service is ready
+         if gmail_client.service is None:
+             print("[DELETE DEBUG] gmail_client.service is None! Attempting to restore...")
+             init_services()
+             
+             # Double check
+             if gmail_client.service is None:
+                 print("[DELETE DEBUG] Failed to restore service.")
+                 # Try explicit auth as last resort if token exists
+                 if gmail_client.authenticate():
+                     print("[DELETE DEBUG] Authenticated successfully.")
+                 else:
+                     return jsonify({'error': 'Gmail service not initialized - Try logging in again'}), 500
+
+         permanent = request.args.get('permanent', 'false').lower() == 'true'
+         success, failure = gmail_client.delete_messages_batch([email_id], permanent=permanent)
+         print(f"[DELETE DEBUG] Batch result: success={success}, failure={failure}")
+         
+         if success > 0:
+             db.mark_emails_deleted([email_id])
+             # Update dashboard cache in background
+             trigger_background_refresh()
+             return jsonify({'success': True, 'id': email_id})
+         else:
+             print("[DELETE DEBUG] Failed (success=0)")
+             return jsonify({'error': 'Failed to delete email'}), 500
+
+    except Exception as e:
+        print(f"[DELETE ERROR] Exception: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e), 'trace': traceback.format_exc()}), 500
 
 
 @app.route('/api/delete/by-sender', methods=['POST'])
@@ -901,11 +1042,13 @@ def api_delete_by_sender():
         if not sender_email:
             return jsonify({'error': 'sender_email required'}), 400
 
-        emails = db.get_emails_by_sender(sender_email)
-        email_ids = [e.id for e in emails]
+        email_ids = db.get_email_ids_by_sender(sender_email)
 
         success, failure = gmail_client.delete_messages_batch(email_ids, permanent=permanent)
         db.mark_emails_deleted(email_ids)
+
+        # Update dashboard cache in background
+        trigger_background_refresh()
 
         return jsonify({
             'sender': sender_email,
@@ -932,15 +1075,16 @@ def api_delete_by_category():
         if not category:
             return jsonify({'error': 'category required'}), 400
 
-        # Don't allow deleting important or uncertain
         if category in ['important', 'uncertain']:
             return jsonify({'error': f'Cannot bulk delete {category} category'}), 400
 
-        emails = db.get_emails_by_category(EmailCategory(category))
-        email_ids = [e.id for e in emails]
+        email_ids = db.get_email_ids_by_category(EmailCategory(category))
 
         success, failure = gmail_client.delete_messages_batch(email_ids, permanent=permanent)
         db.mark_emails_deleted(email_ids)
+
+        # Update dashboard cache in background
+        trigger_background_refresh()
 
         return jsonify({
             'category': category,
@@ -1046,45 +1190,72 @@ def api_train_model():
         print(f"Training Error: {e}")
         return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/stats')
-def api_stats():
-    """Get overall statistics."""
+@app.route('/api/reply', methods=['POST'])
+def api_generate_reply():
+    """Generate smart reply."""
     if not is_authenticated():
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
-        category_stats = db.get_category_stats()
-        sender_stats = db.get_sender_stats()
+        data = request.json or {}
+        email_id = data.get('email_id')
+        tone = data.get('tone', 'polite')
 
-        total_emails = sum(s['count'] for s in category_stats.values())
-        total_unread = sum(s['unread'] for s in category_stats.values())
+        email = db.get_email(email_id)
+        if not email:
+            return jsonify({'error': 'Email not found'}), 404
 
-        # Calculate deletable (non-important, non-uncertain)
-        deletable = sum(
-            s['count'] for cat, s in category_stats.items()
-            if cat not in ['important', 'uncertain', 'personal']
-        )
-
-        return jsonify({
-            'total_emails': total_emails,
-            'total_unread': total_unread,
-            'total_senders': len(sender_stats),
-            'deletable': deletable,
-            'would_keep': total_emails - deletable,
-            'categories': category_stats,
-            'top_senders': [
-                {
-                    'email': s.email,
-                    'name': s.name,
-                    'count': s.total_emails,
-                    'unread': s.unread_count
-                }
-                for s in sender_stats[:10]
-            ]
-        })
+        client = get_ollama_client()
+        if not client.is_available():
+             return jsonify({'error': 'AI unavailable'}), 503
+             
+        # Combine snippet and body
+        context = f"From: {email.sender}\nSubject: {email.subject}\nContent: {email.snippet} {email.body_preview}"
+        
+        reply = client.generate_reply(context, tone)
+        return jsonify({'reply': reply})
 
     except Exception as e:
+        print(f"Reply Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/subscriptions')
+def api_subscriptions():
+    """Get subscription stats."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+    try:
+        stats = db.get_subscription_stats()
+        return jsonify(stats) if stats else jsonify([])
+    except Exception as e:
+         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/stats')
+@time_execution
+def api_stats():
+    """Get overall statistics (Cached)."""
+    if not is_authenticated():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        # Try to get cached stats first
+        cached_data = db.get_setting('dashboard_cache')
+        
+        if cached_data:
+            return jsonify(json.loads(cached_data))
+            
+        # Fallback: Refresh if missing
+        print("[CACHE MISS] Generating dashboard stats...")
+        # CRITICAL FIX: Must refresh ALL stats (including sender_stats table) not just global
+        db.refresh_all_stats()
+        # Fetch the newly generated cache
+        data = json.loads(db.get_setting('dashboard_cache'))
+        return jsonify(data)
+
+    except Exception as e:
+        print(f"Stats Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -1247,8 +1418,7 @@ def get_settings():
     # Default settings
     settings = {
         'theme': database.get_setting('theme', 'dark'),
-        'accent_color': database.get_setting('accent_color', '#4fd1c5'),
-        'gemini_api_key': database.get_setting('gemini_api_key', '')
+        'accent_color': database.get_setting('accent_color', '#4fd1c5')
     }
     return jsonify(settings)
 
@@ -1262,23 +1432,52 @@ def save_settings():
     database = get_db()
     
     # Save valid settings
-    valid_keys = ['theme', 'accent_color', 'gemini_api_key']
+    valid_keys = ['theme', 'accent_color']
     for key in valid_keys:
         if key in data:
             database.set_setting(key, data[key])
-            
-            # Special handling for API key
-            if key == 'gemini_api_key':
-                try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=data[key])
-                except:
-                    pass
 
     return jsonify({'success': True})
 
 
 
+# Background Task Helper
+refresh_timer = None
+
+def trigger_background_refresh():
+    """Run stats refresh in a separate thread to avoid blocking UI, with debounce."""
+    global refresh_timer
+    
+    def run_refresh():
+        try:
+            print("[BACKGROUND] Starting stats refresh (Debounced)...")
+            db.refresh_all_stats()
+            print("[BACKGROUND] Stats refresh complete.")
+        except Exception as e:
+            print(f"[BACKGROUND] Error refreshing stats: {e}")
+
+    # Cancel existing timer if it exists
+    if refresh_timer:
+        refresh_timer.cancel()
+    
+    # Start new timer for 2 seconds
+    refresh_timer = threading.Timer(2.0, run_refresh)
+    refresh_timer.daemon = True
+    refresh_timer.start()
+
+# Initialize DB on startup
+with app.app_context():
+    pass 
+
 if __name__ == '__main__':
     create_app()
+    
+    # Initial stats refresh in background
+    if is_setup_complete():
+        def initial_refresh():
+            with app.app_context():
+                get_db().refresh_all_stats()
+                print("[STARTUP] All statistics refreshed and cached")
+        threading.Thread(target=initial_refresh).start()
+
     app.run(debug=True, port=5000, host='0.0.0.0')

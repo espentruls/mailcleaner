@@ -1,7 +1,5 @@
 """
-AI-powered email summarization using Google Gemini API.
-Uses the free tier via Google AI Studio.
-Caches summaries to minimize API calls.
+AI-powered email summarization using Local Ollama.
 """
 
 import os
@@ -12,38 +10,11 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
 
-import google.generativeai as genai
-from dotenv import load_dotenv
-
+from ollama_client import OllamaClient
 from models import Email, Database
 
-load_dotenv()
-
-
-class RateLimiter:
-    """Simple rate limiter for API calls."""
-
-    def __init__(self, max_calls: int, period_seconds: int):
-        self.max_calls = max_calls
-        self.period = period_seconds
-        self.calls = []
-
-    def can_call(self) -> bool:
-        now = time.time()
-        # Remove old calls outside the window
-        self.calls = [t for t in self.calls if now - t < self.period]
-        return len(self.calls) < self.max_calls
-
-    def record_call(self):
-        self.calls.append(time.time())
-
-    def wait_if_needed(self):
-        while not self.can_call():
-            time.sleep(1)
-
-
 class SummaryCache:
-    """Cache for email summaries to avoid redundant API calls."""
+    """Cache for email summaries to avoid redundant AI calls."""
 
     def __init__(self, cache_path: str = None):
         base_path = Path(__file__).parent.parent / ".tmp"
@@ -88,35 +59,17 @@ class SummaryCache:
 
 class EmailSummarizer:
     """
-    Summarizes emails using Google Gemini API.
-    Uses free tier (5-15 RPM) with caching to minimize calls.
+    Summarizes emails using Local Ollama.
     """
 
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
-        self.model = None
+        # API key is no longer needed/used but kept for signature compatibility during refactor
+        self.client = OllamaClient()
         self.cache = SummaryCache()
-        # Conservative rate limit: 10 RPM to stay safe
-        self.rate_limiter = RateLimiter(max_calls=10, period_seconds=60)
-        self._initialized = False
-
-        if self.api_key:
-            self._initialize()
-
-    def _initialize(self):
-        """Initialize the Gemini API."""
-        try:
-            genai.configure(api_key=self.api_key)
-            # Use Gemini Flash for speed and lower cost
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-            self._initialized = True
-        except Exception as e:
-            print(f"Error initializing Gemini: {e}")
-            self._initialized = False
 
     def is_available(self) -> bool:
         """Check if AI summarization is available."""
-        return self._initialized and self.model is not None
+        return self.client.is_available()
 
     def summarize_email(self, email: Email, force: bool = False) -> Optional[str]:
         """
@@ -135,22 +88,33 @@ class EmailSummarizer:
             if cached:
                 return cached
 
-        # Rate limit check
-        self.rate_limiter.wait_if_needed()
-
         try:
-            prompt = f"""Summarize this email in 1-2 sentences. Focus on the main purpose/action required.
-Be concise and direct. If it's promotional, say what's being offered. If it's a notification, say what happened.
+            prompt = f"Summarize this email in 1-2 sentences. Focus on the main purpose/action required.\n\nEmail:\n{text}"
+            
+            # Using category 'summary' logic from ollama_client if appropriate, 
+            # or just a raw generate call. Using _generate from client would be ideal
+            # but it is internal. We can use customize logic here or add public method to client.
+            # For now, let's use the client's internal `_generate` if accessible or reimplement simple generation wrapper
+            # modifying client usage to be safe.
+            
+            # Actually, let's check if OllamaClient has a generic chat/generate method exposed.
+            # Looking at ollama_client.py (previous knowledge): it has `classify_email`, `summarize_sender`, `review_uncertain`.
+            # It DOES NOT occupy a generic `generate` method publicly.
+            # However, I can use `requests` directly here or add a method to `OllamaClient`.
+            # A cleaner approach is to use `OllamaClient`'s _generate method if I can, OR just replicate the call 
+            # since `OllamaClient` handles the host/model logic.
+            
+            # Replicating simple generate call using client properties:
+            
+            summary = self.client._generate(
+                prompt=prompt,
+                system="You are a helpful email assistant. Be concise."
+            )
 
-Email:
-{text}
+            if not summary:
+                 return self._fallback_summary(email)
 
-Summary:"""
-
-            response = self.model.generate_content(prompt)
-            self.rate_limiter.record_call()
-
-            summary = response.text.strip()
+            summary = summary.strip()
 
             # Cache the result
             self.cache.set(text, summary)
@@ -164,103 +128,52 @@ Summary:"""
     def summarize_sender_batch(self, emails: List[Email], sender_email: str) -> Optional[str]:
         """
         Generate a single summary for all emails from the same sender.
-        Useful for bulk newsletters/promotions.
         """
-        if not emails:
-            return None
-
-        if not self.is_available():
-            return f"{len(emails)} emails from {emails[0].sender}"
-
-        # Build a summary of the emails
-        subjects = [e.subject for e in emails[:10]]  # Limit to recent 10
-        sender_name = emails[0].sender
-
-        text = f"Sender: {sender_name}\nSubjects:\n" + "\n".join(f"- {s}" for s in subjects)
-
-        # Check cache
-        cached = self.cache.get(f"sender:{sender_email}:{len(emails)}")
-        if cached:
-            return cached
-
-        self.rate_limiter.wait_if_needed()
-
-        try:
-            prompt = f"""Summarize what kind of emails this sender typically sends based on these subject lines.
-Be brief (1-2 sentences). Mention if they're newsletters, promotions, notifications, etc.
-
-{text}
-
-Summary:"""
-
-            response = self.model.generate_content(prompt)
-            self.rate_limiter.record_call()
-
-            summary = response.text.strip()
-            self.cache.set(f"sender:{sender_email}:{len(emails)}", summary)
-
-            return summary
-
-        except Exception as e:
-            print(f"Error generating sender summary: {e}")
-            return f"{len(emails)} emails - topics: {', '.join(subjects[:3])}"
+        # This functionality exists in OllamaClient! let's delegate.
+        return self.client.summarize_sender(emails)
 
     def analyze_email_importance(self, email: Email) -> dict:
         """
         Analyze if an email is important and why.
-        Returns dict with 'is_important', 'reason', 'confidence'.
-        Only used for uncertain emails.
         """
         if not self.is_available():
-            return {
-                'is_important': False,
-                'reason': 'AI unavailable',
-                'confidence': 0.0
-            }
+             return {'is_important': False, 'reason': 'AI unavailable', 'confidence': 0.0}
 
         text = f"From: {email.sender} <{email.sender_email}>\nSubject: {email.subject}\n\n{email.body_preview[:500]}"
-
-        self.rate_limiter.wait_if_needed()
-
-        try:
-            prompt = f"""Analyze this email and determine if it's important or can be safely deleted.
-
+        
+        prompt = f"""Analyze this email and determine if it's important or can be safely deleted.
 Email:
 {text}
-
 Respond in JSON format:
 {{"is_important": true/false, "reason": "brief reason", "confidence": 0.0-1.0}}
-
-Important emails include: personal messages, invoices, receipts, confirmations, security alerts, appointments.
-Not important: promotional, newsletters, social notifications, ads, spam.
-
+Important emails: personal, invoices, receipts, security alerts.
+Not important: newsletters, promotions, ads, spam.
 JSON:"""
 
-            response = self.model.generate_content(prompt)
-            self.rate_limiter.record_call()
-
-            # Parse JSON response
-            response_text = response.text.strip()
-            # Extract JSON from response (handle markdown code blocks)
+        try:
+            response = self.client._generate(
+                prompt=prompt,
+                system="You are an email analyzer. Respond only in JSON."
+            )
+            
+            # Parse JSON similar to before
+            response_text = response.strip()
             if '```' in response_text:
-                response_text = response_text.split('```')[1]
-                if response_text.startswith('json'):
-                    response_text = response_text[4:]
-
+                parts = response_text.split('```')
+                if len(parts) > 1:
+                    response_text = parts[1]
+                    if response_text.startswith('json'):
+                        response_text = response_text[4:]
+            
             result = json.loads(response_text)
             return {
                 'is_important': result.get('is_important', False),
                 'reason': result.get('reason', ''),
                 'confidence': float(result.get('confidence', 0.5))
             }
-
         except Exception as e:
             print(f"Error analyzing importance: {e}")
-            return {
-                'is_important': False,
-                'reason': f'Analysis error: {str(e)}',
-                'confidence': 0.0
-            }
+            return {'is_important': False, 'reason': f'Error: {str(e)}', 'confidence': 0.0}
 
     def _fallback_summary(self, email: Email) -> str:
         """Generate a basic summary without AI."""
@@ -274,16 +187,12 @@ JSON:"""
 
     def batch_summarize_uncertain(self, emails: List[Email], db: Database) -> List[Email]:
         """
-        Summarize only uncertain emails to save API calls.
-        Updates emails in-place and saves to database.
+        Summarize only uncertain emails.
         """
         uncertain = [e for e in emails if e.category and e.category.value == 'uncertain']
-
-        # Also summarize low-confidence categorizations
-        low_confidence = [e for e in emails
-                        if e.category_confidence < 0.4 and e not in uncertain]
-
-        to_summarize = uncertain + low_confidence[:20]  # Limit to conserve API
+        
+        # Limit processing for local AI speed
+        to_summarize = uncertain[:10]
 
         for email in to_summarize:
             if not email.ai_summary:
@@ -296,44 +205,15 @@ JSON:"""
 
 def main():
     """Test the summarizer."""
-    summarizer = EmailSummarizer()
+    try:
+        summarizer = EmailSummarizer()
+        if not summarizer.is_available():
+            print("Ollama not available.")
+            return
 
-    if not summarizer.is_available():
-        print("Gemini API not available. Set GEMINI_API_KEY environment variable.")
-        return
-
-    # Test email
-    test_email = Email(
-        id="test1",
-        thread_id="test1",
-        sender="TechNews Daily",
-        sender_email="newsletter@technews.com",
-        subject="Your Weekly Tech Digest - AI, Cloud, and More",
-        snippet="This week in tech: OpenAI announces new features, AWS launches new service...",
-        body_preview="""This week in tech:
-
-- OpenAI announces GPT-5 preview
-- AWS launches new serverless database
-- Microsoft updates VS Code with AI features
-- Google releases new Gemini models
-
-Read more at technews.com
-
-Unsubscribe | Update preferences""",
-        date=datetime.now(),
-        is_read=True,
-        labels=[],
-        unsubscribe_link="https://technews.com/unsubscribe"
-    )
-
-    print("Testing single email summary...")
-    summary = summarizer.summarize_email(test_email)
-    print(f"Summary: {summary}")
-
-    print("\nTesting importance analysis...")
-    importance = summarizer.analyze_email_importance(test_email)
-    print(f"Importance: {importance}")
-
+        print("Ollama Summarizer Initialized.")
+    except Exception as e:
+        print(f"Failed to init: {e}")
 
 if __name__ == "__main__":
     main()

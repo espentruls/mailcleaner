@@ -610,7 +610,7 @@ a {
 .content-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 24px;
+    gap: 0;
     margin-bottom: 24px;
 }
 
@@ -917,7 +917,13 @@ a {
     color: white;
 }
 
-/* Email List */
+/* Email List & Grid */
+.cleanup-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
 .email-list {
     display: flex;
     flex-direction: column;
@@ -1027,15 +1033,25 @@ a {
 .sender-group-stats {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 12px;
+    margin-right: 16px;
+}
+
+.sender-group-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .sender-group-stat {
     text-align: center;
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
 
 .sender-group-stat .value {
-    font-size: 18px;
+    font-size: 14px;
     font-weight: 700;
     display: block;
 }
@@ -1046,19 +1062,34 @@ a {
     text-transform: uppercase;
 }
 
-.sender-group-actions {
-    display: flex;
-    gap: 8px;
+gap: 8px;
 }
 
-.sender-group-emails {
-    display: none;
-    padding: 16px 20px;
+.sender-group .chevron {
+    transition: transform 0.3s ease;
+}
+
+.sender-group.expanded .chevron {
+    transform: rotate(180deg);
+}
+
+/* Accordion Transition using Grid */
+.sender-group-body {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease-out, padding 0.3s ease, border 0.3s ease;
+    border-top: 0px solid transparent;
+    /* Start invisible */
+}
+
+.sender-group.expanded .sender-group-body {
+    grid-template-rows: 1fr;
     border-top: 1px solid var(--border-color);
 }
 
-.sender-group.expanded .sender-group-emails {
-    display: block;
+.sender-group-inner {
+    overflow: hidden;
+    min-height: 0;
 }
 
 /* Modal */
@@ -1413,6 +1444,15 @@ background: var(--secondary);
 .settings-header {
     text-align: center;
     margin-bottom: 40px;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.settings-container {
+    max-width: 600px;
+    margin: 0 auto;
+    width: 100%;
 }
 
 .setting-row {
@@ -1548,7 +1588,8 @@ background: var(--secondary);
 }
 
 .api-key-field {
-    padding-right: 40px !important;
+    padding-right: 80px !important;
+    /* Space for 2 buttons */
     width: 100%;
 }
 
@@ -1718,4 +1759,58 @@ background: var(--secondary);
 .ai-status-dot.online {
     background: var(--success);
     box-shadow: 0 0 8px var(--success);
+}
+
+/* Button Feedback Enhancements */
+.btn-danger {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-danger:hover {
+    background-color: #ef4444;
+    /* Brighter red */
+    transform: scale(1.05);
+    box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.3);
+}
+
+.btn-danger:active {
+    transform: scale(0.95);
+    background-color: #dc2626;
+}
+
+.btn-loading {
+    cursor: not-allowed !important;
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.btn-loading i {
+    animation: spin 1s linear infinite;
+    display: inline-block;
+}
+
+.btn-confirm-delete {
+    background-color: #dc2626 !important;
+    border-color: #dc2626 !important;
+    animation: pulse 1s infinite;
+}
+
+.btn-confirm-delete:hover {
+    background-color: #ef4444 !important;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.05);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }

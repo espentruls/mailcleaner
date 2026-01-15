@@ -278,10 +278,11 @@ Analysis:"""
         if not emails:
             return []
 
-        # Prepare list for prompt
+        # Prepare list for prompt - limit to 15 emails to fit context window
         email_list_text = ""
-        for i, e in enumerate(emails[:50]): # Limit to 50 for context window
-            email_list_text += f"ID: {e.get('id')}\nFrom: {e.get('sender')}\nSubject: {e.get('subject')}\nPreview: {e.get('snippet')[:100]}\n---\n"
+        for i, e in enumerate(emails[:15]):
+            snippet = (e.get('snippet') or '')[:50]
+            email_list_text += f"ID: {e.get('id')}\nFrom: {e.get('sender')}\nSubject: {e.get('subject')}\nPreview: {snippet}\n---\n"
 
         system = """You are an intelligent email cleaner. Your task is to identify emails that are clearly SPAM, PROMOTIONAL JUNK, or USELESS NOTIFICATIONS that can be safely deleted.
         
@@ -309,6 +310,7 @@ If none, return []."""
 JSON Response:"""
 
         response = self._generate(prompt, system)
+        print(f"DEBUG: RAW OLLAMA RESPONSE: {response}")
         
         try:
             # Clean response to ensure json parsing works
@@ -326,6 +328,67 @@ JSON Response:"""
             print(f"Error parsing AI suggestions: {e}")
             return []
 
+    def analyze_subscription_value(self, sender: str, stats: Dict, recent_subjects: List[str]) -> Dict:
+        """
+        Analyze a subscription to recommend identifying it as KEEP or UNSUBSCRIBE.
+        """
+        system = """You are a ruthless email auditor. Analyze this newsletter subscription and decide if it is worth keeping.
+        
+        Criteria for UNSUBSCRIBE:
+        - High unread ratio (user ignores most emails)
+        - Generic, repetitive, or low-value content (ads, alerts)
+        - "Do not reply" or notification-heavy senders
+
+        Criteria for KEEP:
+        - High open rate/read rate
+        - Personalized or valuable content
+        - Critical account alerts
+
+        Return JSON:
+        {
+            "recommendation": "KEEP" | "UNSUBSCRIBE",
+            "reason": "Short, punchy reason (max 10 words)",
+            "confidence": 0.0 to 1.0
+        }"""
+
+        open_rate = 0
+        if stats.get('total', 0) > 0:
+            open_rate = (stats.get('total', 0) - stats.get('unread', 0)) / stats.get('total', 1)
+
+        subjects_text = "\\n".join([f"- {s}" for s in recent_subjects[:5]])
+
+        prompt = f"""Sender: {sender}
+        Stats: {stats.get('total')} emails, {stats.get('unread')} unread.
+        Open Rate: {open_rate:.1%}
+        
+        Recent Subjects:
+        {subjects_text}
+        
+        JSON Recommendation:"""
+
+        response = self._generate(prompt, system)
+        
+        try:
+            # Clean response
+            response = response.strip()
+            if response.startswith("```json"):
+                response = response[7:]
+            if response.endswith("```"):
+                response = response[:-3]
+            
+            return json.loads(response)
+        except Exception as e:
+            print(f"Error parsing AI analysis: {e}")
+            return {"recommendation": "KEEP", "reason": "AI Analysis failed", "confidence": 0.0}
+
+    def generate_reply(self, email_text: str, tone: str = "polite") -> str:
+        """Generate a smart reply."""
+        system = f"You are a helpful email assistant. Draft a SHORT, PROFESSIONAL {tone} reply to the following email. Keep it under 50 words. Do not include subject lines."
+        prompt = f"Email Context: {email_text}\n\nDraft Reply:"
+        try:
+             return self._generate(prompt, system).strip('"').strip()
+        except:
+             return "Could not generate reply."
 
 
 # Global instance for easy access

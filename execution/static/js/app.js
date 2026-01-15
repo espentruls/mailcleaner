@@ -1,6 +1,46 @@
 // MailCleaner Frontend Application
 
-// State
+// Smart Reply
+async function generateReply(tone) {
+    if (!state.currentEmail?.id) return;
+
+    const container = document.getElementById('reply-container');
+    const loading = document.getElementById('reply-loading');
+    const textEl = document.getElementById('reply-text');
+
+    if (container) container.style.display = 'block';
+    if (loading) loading.style.display = 'block';
+    if (textEl) textEl.textContent = '';
+
+    try {
+        const result = await api('/reply', {
+            method: 'POST',
+            body: JSON.stringify({ email_id: state.currentEmail.id, tone: tone })
+        });
+
+        if (loading) loading.style.display = 'none';
+
+        if (result.reply) {
+            // Remove quotes if present
+            let reply = result.reply.replace(/^"|"$/g, '').replace(/\\n/g, '\n');
+            textEl.textContent = reply;
+        } else {
+            textEl.textContent = "Failed to generate.";
+        }
+    } catch (e) {
+        if (loading) loading.style.display = 'none';
+        showToast('Reply generation failed', 'error');
+    }
+}
+
+function copyReply() {
+    const text = document.getElementById('reply-text').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Copied to clipboard!', 'success');
+    });
+}
+
+// Global state
 let state = {
     currentView: 'overview',
     currentCategory: null,
@@ -91,6 +131,76 @@ function switchView(view) {
         case 'uncertain':
             loadUncertainEmails();
             break;
+        case 'cleanup':
+            loadCleanupSuggestions();
+            break;
+        case 'subscriptions':
+            loadSubscriptions();
+            break;
+        case 'settings':
+            // Settings loaded by default
+            break;
+    }
+}
+
+
+function formatDate(dateString) {
+    if (!dateString) return 'Never';
+    try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    } catch (e) {
+        return dateString;
+    }
+}
+
+async function loadSubscriptions() {
+    const list = document.getElementById('subscription-list');
+
+    try {
+        showLoading('Loading subscriptions...');
+        const subs = await api('/subscriptions');
+        console.log('Subscriptions API Response:', subs);
+
+        if (!Array.isArray(subs)) {
+            console.error('Invalid subscriptions data:', subs);
+            throw new Error('Data format error');
+        }
+
+        if (subs.length === 0) {
+            list.innerHTML = '<tr><td colspan="4" class="text-center">No high-volume newsletters found.</td></tr>';
+            return;
+        }
+
+        const html = subs.map(sub => `
+            <tr>
+                <td>
+                    <div style="font-weight:500">${sub.sender || 'Unknown'}</div>
+                    <div style="font-size:0.85em; color:var(--text-muted)">${sub.sender_email}</div>
+                </td>
+                <td>
+                    <div>${sub.count} <span style="color:var(--warning); font-size:0.9em">(${sub.unread_count} unread)</span></div>
+                </td>
+                <td>
+                     <div title="Last Received: ${formatDate(sub.last_received_date)}">${sub.last_read_date ? formatDate(sub.last_read_date) : '<span style="opacity:0.5">Never read</span>'}</div>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="unsubscribeSender('${sub.sender}', '${sub.sender_email}')">
+                        <i class="ri-mail-close-line"></i> Unsubscribe
+                    </button>
+                    ${sub.unsubscribe_link ? `
+                    <a href="${sub.unsubscribe_link}" target="_blank" class="btn btn-sm btn-secondary" style="margin-left:5px">
+                        <i class="ri-external-link-line"></i>
+                    </a>` : ''}
+                </td>
+            </tr>
+        `).join('');
+        list.innerHTML = html;
+
+    } catch (error) {
+        list.innerHTML = `<tr><td colspan="4" class="text-center text-danger">Error: ${error.message}</td></tr>`;
+    } finally {
+        hideLoading();
     }
 }
 
@@ -99,6 +209,12 @@ function setupEventListeners() {
     if (elements.fetchBtn) {
         elements.fetchBtn.addEventListener('click', fetchEmails);
     }
+
+    const analyzeBtn = document.getElementById('ai-analyze-subs');
+    if (analyzeBtn) {
+        analyzeBtn.addEventListener('click', analyzeSubscriptions);
+    }
+
     if (elements.resetBtn) {
         elements.resetBtn.addEventListener('click', resetAccount);
     }
@@ -125,6 +241,23 @@ function setupEventListeners() {
         elements.modal.addEventListener('click', (e) => {
             if (e.target === elements.modal) {
                 closeModal();
+            }
+        });
+    }
+
+    // Delegated listener for Sender Groups (Collapse/Expand)
+    const senderList = document.getElementById('sender-list');
+    if (senderList) {
+        senderList.addEventListener('click', (e) => {
+            const header = e.target.closest('.sender-group-header');
+            // Ignore if clicking the delete button (which has its own listener/onclick)
+            if (header && !e.target.closest('.btn-danger')) {
+                const group = header.closest('.sender-group');
+                if (group) {
+                    const idx = group.id.replace('group-', '');
+                    const email = group.dataset.email;
+                    toggleGroup(idx, email);
+                }
             }
         });
     }
@@ -313,20 +446,24 @@ async function refreshData() {
 // AI Cleanup Logic
 async function loadCleanupSuggestions() {
     const intro = document.getElementById('cleanup-intro');
-    const loading = document.getElementById('cleanup-loading');
     const results = document.getElementById('cleanup-results');
 
     if (intro) intro.style.display = 'none';
-    if (loading) loading.style.display = 'block';
     results.innerHTML = '';
 
     try {
+        showLoading('Scanning for clutter...');
         const data = await api('/suggestions/deletion', { method: 'POST' });
 
-        if (loading) loading.style.display = 'none';
+        console.log('Cleanup Data:', data); // Debugging
 
-        if (!data.suggestions || data.suggestions.length === 0) {
-            results.innerHTML = '<div class="empty-state"><i class="ri-check-double-line"></i><p>No junk found! Your inbox is clean.</p></div>';
+        if (!data || !data.suggestions || data.suggestions.length === 0) {
+            results.innerHTML = `
+                <div class="empty-state" style="text-align: center; padding: 3rem; color: var(--text-secondary);">
+                    <i class="ri-check-double-line" style="font-size: 3rem; margin-bottom: 1rem; color: var(--success);"></i>
+                    <h3>No junk found!</h3>
+                    <p>Your inbox is clean for now.</p>
+                </div>`;
             return;
         }
 
@@ -343,17 +480,35 @@ async function loadCleanupSuggestions() {
         // But state might not have them.
 
         // Render suggestions
-        if (typeof renderEmailList === 'function') {
-            renderEmailList(data.suggestions, 'cleanup-results', true);
-        } else {
-            console.error('renderEmailList not found');
-            results.innerHTML = data.suggestions.map(e => `<div>${e.subject}</div>`).join('');
+        // Render suggestions safely
+        try {
+            if (typeof renderEmailList === 'function') {
+                renderEmailList(data.suggestions, 'cleanup-results', true);
+            } else {
+                console.error('renderEmailList not found');
+                results.innerHTML = data.suggestions.map(e => `
+                    <div class="email-card">
+                        <div class="email-subject">${e.subject || '(No Subject)'}</div>
+                        <div class="email-snippet">${e.snippet || 'No preview'}</div>
+                        <div style="color:red; font-size:0.8em;">Render Error: Function missing</div>
+                    </div>
+                `).join('');
+            }
+        } catch (renderError) {
+            console.error('Rendering failed:', renderError);
+            results.innerHTML = `<div style="padding:20px; color:red;">
+                <h3>Rendering Error</h3>
+                <p>Could not display emails. Please check console.</p>
+                <p>${renderError.message}</p>
+             </div>`;
         }
 
     } catch (error) {
         if (loading) loading.style.display = 'none';
         showToast(error.message, 'error');
         if (intro) intro.style.display = 'block';
+    } finally {
+        hideLoading();
     }
 }
 
@@ -377,12 +532,62 @@ async function loadStats() {
         if (deletableEl) deletableEl.textContent = stats.deletable || 0;
         if (keepEl) keepEl.textContent = stats.would_keep || 0;
 
+        // Update Mood Widget
+        if (stats.mood) {
+            const moodText = document.getElementById('mood-text');
+            const moodIcon = document.getElementById('mood-icon');
+            const moodDesc = document.getElementById('mood-desc');
+            const moodCard = document.querySelector('.mood-card');
+
+            if (moodText) moodText.innerText = stats.mood.text;
+            if (moodIcon) moodIcon.innerText = stats.mood.emoji;
+            if (moodDesc) moodDesc.innerText = stats.mood.desc;
+            if (moodCard && stats.mood.color) moodCard.style.borderLeftColor = stats.mood.color;
+        }
+
+        // Update Leaderboard
+        if (stats.leaderboard) {
+            const chattyList = document.getElementById('leaderboard-chatty');
+            const spammerList = document.getElementById('leaderboard-spammers');
+
+            const renderItem = (item, i) => `
+                <li style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: var(--bg-body); border-radius: 4px;">
+                    <div style="display: flex; gap: 0.5rem; align-items: center; overflow: hidden;">
+                        <span style="font-weight: bold; color: var(--primary-color); flex-shrink: 0;">${i + 1}.</span>
+                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.sender_email}">${item.sender || item.sender_email}</span>
+                    </div>
+                    <span class="badge" style="background: var(--bg-card-secondary); flex-shrink: 0;">${item.count}</span>
+                </li>
+            `;
+
+            if (chattyList && stats.leaderboard.chatty) {
+                chattyList.innerHTML = stats.leaderboard.chatty.map(renderItem).join('');
+            }
+            if (spammerList && stats.leaderboard.spammers) {
+                // Custom render for spammers to show unread count
+                spammerList.innerHTML = stats.leaderboard.spammers.map((item, i) => `
+                <li style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: var(--bg-body); border-radius: 4px;">
+                    <div style="display: flex; gap: 0.5rem; align-items: center; overflow: hidden;">
+                        <span style="font-weight: bold; color: var(--warning); flex-shrink: 0;">${i + 1}.</span>
+                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.sender_email}">${item.sender || item.sender_email}</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <span class="badge" style="background: var(--bg-card-secondary); color: var(--text-primary);">${item.count}</span>
+                        ${item.unread_count > 0 ? `<div style="font-size: 0.7em; color: var(--warning); margin-top: 2px;">${item.unread_count} unread</div>` : ''}
+                    </div>
+                </li>
+                `).join('');
+            }
+        }
+
         console.log('[loadStats] Rendering categories:', stats.categories);
         renderCategoryList(stats.categories);
         console.log('[loadStats] Rendering top senders:', stats.top_senders);
         renderTopSenders(stats.top_senders);
         console.log('[loadStats] Done!');
 
+        // Update sidebar badges too
+        updateGlobalStats();
     } catch (error) {
         console.error('[loadStats] Failed to load stats:', error);
     }
@@ -428,22 +633,50 @@ function renderCategoryList(categories) {
 function renderTopSenders(senders) {
     const container = document.getElementById('top-senders');
     if (!senders || senders.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 20px;">No sender data available.</p>';
+        // Only show "No data" if the container is currently empty or has the "No data" message
+        // This prevents overwriting valid SSR data with an empty transient response
+        if (container.children.length === 0 || container.querySelector('p')) {
+            container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 20px;">No sender data available.</p>';
+        }
         return;
     }
 
     container.innerHTML = senders.map(sender => `
-        <div class="sender-item">
-            <div class="sender-info">
-                <span class="sender-name">${sender.name || sender.email}</span>
-                <span class="sender-email">${sender.email}</span>
+        <div class="category-item clickable-sender" data-email="${sender.email}">
+            <div class="category-info">
+                <div class="category-icon personal">
+                    <i class="ri-user-line"></i>
+                </div>
+                <div class="sender-details" style="display: flex; flex-direction: column;">
+                    <span class="category-name">${sender.name || sender.email}</span>
+                    <span style="font-size: 11px; color: var(--text-muted);">${sender.email}</span>
+                </div>
             </div>
-            <div class="sender-stats">
-                ${sender.unread > 0 ? `<span style="color: var(--warning)">${sender.unread} unread</span>` : ''}
-                <span class="sender-count">${sender.count}</span>
+            <div class="category-count">
+                ${sender.unread > 0 ? `<span class="category-unread">${sender.unread} unread</span>` : ''}
+                <span class="category-badge">${sender.count || sender.total_emails || 0}</span>
             </div>
         </div>
     `).join('');
+
+    // Add click handlers for deep linking
+    document.querySelectorAll('.clickable-sender').forEach(item => {
+        item.addEventListener('click', () => {
+            const senderEmail = item.dataset.email;
+            expandSenderGroup(senderEmail);
+        });
+    });
+}
+
+// Deep link to sender group
+async function expandSenderGroup(senderEmail) {
+    // Set target for auto-expansion after render
+    state.nextExpandedSender = senderEmail;
+
+    // Switch view (will trigger loadSenderGroups -> renderSenderGroups)
+    switchView('senders');
+
+    // Logic is now handled in renderSenderGroups to avoid race conditions
 }
 
 // View Category
@@ -456,7 +689,9 @@ function viewCategory(category) {
 // Load Categories
 async function loadCategories() {
     try {
+        showLoading('Loading categories...');
         const data = await api('/emails/by-category');
+
 
         const tabsContainer = document.getElementById('category-tabs');
 
@@ -492,6 +727,8 @@ async function loadCategories() {
 
     } catch (error) {
         showToast(error.message, 'error');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -515,20 +752,24 @@ async function loadCategoryEmails(category) {
     }
 
     try {
+        showLoading(`Loading ${category} emails...`);
         const data = await api(`/emails?category=${category}&read_filter=${state.readFilter}`);
         renderEmailList(data.emails, 'category-emails');
     } catch (error) {
         showToast(error.message, 'error');
+    } finally {
+        hideLoading();
     }
 }
 
 // Load Sender Groups
+// Load Sender Groups (Top Senders)
 async function loadSenderGroups() {
     try {
-        showLoading('Loading sender groups...');
-        const data = await api(`/emails/grouped?read_filter=${state.readFilter}`);
-        state.groups = data.groups;
-        renderSenderGroups(data.groups);
+        showLoading('Analyzing top senders...');
+        const data = await api('/senders/top?limit=50');
+        state.groups = data;
+        renderSenderGroups(data);
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
@@ -537,59 +778,206 @@ async function loadSenderGroups() {
 }
 
 // Render Sender Groups
-function renderSenderGroups(groups) {
+function renderSenderGroups(groups, suggestions = []) { // Added suggestions parameter
     const container = document.getElementById('sender-list');
     if (!groups || groups.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No emails loaded. Fetch emails first.</p>';
-        return;
+        if (suggestions.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon"><i class="ri-sparkling-2-line"></i></div>
+                    <h3>Inbox is Clean!</h3>
+                    <p>AI couldn't find any obvious bulk deletions. Good job!</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = suggestions.map(group => `
+            <div class="suggestion-card">
+                <div class="suggestion-header">
+                    <div class="sender-info">
+                        <strong>${group.sender}</strong>
+                        <span>${group.sender_email}</span>
+                    </div>
+                    <div class="suggestion-stats">
+                        <span class="count-badge">${group.count} emails</span>
+                        <span class="reason-badge">${group.reason || 'Bulk sender'}</span>
+                    </div>
+                </div>
+                <div class="suggestion-actions">
+                    <button class="btn btn-danger btn-sm" onclick="bulkDelete('${group.sender_email}')">
+                        <i class="ri-delete-bin-line"></i> Delete All
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        return; // Added return here to prevent rendering groups if suggestions are shown
     }
 
     container.innerHTML = groups.map((group, idx) => `
-        <div class="sender-group" id="group-${idx}">
-            <div class="sender-group-header" onclick="toggleGroup(${idx})">
+        <div class="sender-group" id="group-${idx}" data-email="${group.sender_email}">
+            <div class="sender-group-header">
                 <div class="sender-group-info">
                     <h4>${group.sender || group.sender_email}</h4>
                     <p>${group.sender_email}</p>
                 </div>
-                <div class="sender-group-stats">
-                    <div class="sender-group-stat">
-                        <span class="value">${group.total}</span>
-                        <span class="label">Emails</span>
+                
+                <div class="sender-group-actions">
+                    <div class="sender-group-stats">
+                        <div class="sender-group-stat">
+                            <span class="value">${group.total}</span>
+                            <span class="label">Total</span>
+                        </div>
+                         <div class="sender-group-stat">
+                            <span class="value" style="color: var(--warning)">${group.unread}</span>
+                            <span class="label">Unread</span>
+                        </div>
                     </div>
-                    <div class="sender-group-stat">
-                        <span class="value" style="color: var(--warning)">${group.unread}</span>
-                        <span class="label">Unread</span>
-                    </div>
-                    <div class="sender-group-actions">
-                        ${group.has_unsubscribe ? `
-                            <button class="btn btn-sm btn-warning" onclick="event.stopPropagation(); unsubscribeSender('${group.sender_email}')">
-                                <i class="ri-mail-close-line"></i>
-                            </button>
-                        ` : ''}
-                        <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteSender('${group.sender_email}')">
-                            <i class="ri-delete-bin-line"></i>
-                        </button>
-                        <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); summarizeSender('${group.sender_email}')">
-                            <i class="ri-robot-line"></i>
-                        </button>
-                    </div>
+                     <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); deleteSender('${group.sender_email}')">
+                        <i class="ri-delete-bin-line"></i>
+                    </button>
+                    <i class="ri-arrow-down-s-line chevron"></i>
                 </div>
             </div>
-            <div class="sender-group-emails">
-                ${group.preview_emails ? group.preview_emails.map(email => renderEmailCard(email)).join('') : ''}
+            <div class="sender-group-body" id="group-body-${idx}">
+                <div class="sender-group-inner">
+                    <!-- Emails loaded on demand -->
+                    <div class="loading-placeholder" style="padding: 20px; text-align: center; color: var(--text-muted); display: none;">
+                        <i class="ri-loader-4-line ri-spin" style="font-size: 24px;"></i>
+                    </div>
+                    <div id="group-content-${idx}"></div>
+                </div>
             </div>
         </div>
     `).join('');
+
+    // Handle Auto-Expansion (Deep Linking)
+    if (state.nextExpandedSender) {
+        console.log('[DeepLink] Attempting to expand:', state.nextExpandedSender);
+        const idx = groups.findIndex(g => g.sender_email === state.nextExpandedSender);
+        if (idx !== -1) {
+            console.log('[DeepLink] Found group index:', idx);
+            // Simulate click to ensure exact same behavior as user interaction
+            setTimeout(() => {
+                const groupEl = document.getElementById(`group-${idx}`);
+                if (groupEl) {
+                    groupEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const header = groupEl.querySelector('.sender-group-header');
+                    if (header) {
+                        console.log('[DeepLink] Clicking header for:', state.nextExpandedSender);
+                        header.click();
+                    } else {
+                        console.warn('[DeepLink] Header not found');
+                    }
+                } else {
+                    console.warn('[DeepLink] Group element not found');
+                }
+            }, 500);
+        } else {
+            console.warn('[DeepLink] Sender not found in top list:', state.nextExpandedSender);
+        }
+        state.nextExpandedSender = null;
+    }
+
+    // Update global stats whenever groups are rendered
+    updateGlobalStats();
 }
 
 // Toggle Sender Group
-function toggleGroup(idx) {
-    document.getElementById(`group-${idx}`).classList.toggle('expanded');
+async function toggleGroup(idx, senderEmail, forceExpand = false) {
+    console.log(`[toggleGroup] idx=${idx}, email=${senderEmail}, force=${forceExpand}`);
+
+    const groupEl = document.getElementById(`group-${idx}`);
+    const bodyEl = document.getElementById(`group-body-${idx}`); // Grid container
+    const innerEl = bodyEl ? bodyEl.querySelector('.sender-group-inner') : null;
+    const contentEl = document.getElementById(`group-content-${idx}`); // For inserting emails
+
+    if (!groupEl || !bodyEl || !innerEl) return;
+
+    // Debounce check
+    if (groupEl.dataset.toggling === 'true') {
+        console.log('Ignoring toggle - busy');
+        return;
+    }
+
+    try {
+        groupEl.dataset.toggling = 'true';
+
+        const isExpanded = groupEl.classList.contains('expanded');
+
+        // Logic: Just toggle class. CSS Grid handles the rest.
+        if (forceExpand) {
+            if (!isExpanded) {
+                groupEl.classList.add('expanded');
+            } else {
+                groupEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                return;
+            }
+        } else {
+            groupEl.classList.toggle('expanded');
+        }
+
+        // If collapsing, we are done
+        if (!groupEl.classList.contains('expanded')) {
+            return;
+        }
+
+        // Expanding: Check if loaded.
+        if (bodyEl.dataset.loaded === 'true') {
+            if (forceExpand) groupEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return;
+        }
+
+        // Fetch emails
+        const loadingPlaceholder = bodyEl.querySelector('.loading-placeholder');
+        if (loadingPlaceholder) loadingPlaceholder.style.display = 'block';
+
+        const data = await api(`/emails?sender=${encodeURIComponent(senderEmail)}&limit=10`);
+        if (loadingPlaceholder) loadingPlaceholder.style.display = 'none';
+
+        // Use the content container inside the inner wrapper
+        if (contentEl) {
+            renderEmailList(data.emails, `group-content-${idx}`);
+        } else {
+            // Fallback if structure is weird, but shouldn't happen
+            renderEmailList(data.emails, `group-body-${idx}`);
+        }
+
+        bodyEl.dataset.loaded = 'true'; // Mark as loaded
+
+        // Add "View All" link if total > 10
+        if (data.total > 10) {
+            const viewAll = document.createElement('div');
+            viewAll.className = 'text-center p-3';
+            viewAll.innerHTML = `<button class="btn btn-sm btn-secondary">View all ${data.total} emails</button>`;
+
+            // Append to content container or inner wrapper
+            (contentEl || innerEl).appendChild(viewAll);
+        }
+
+        if (forceExpand) {
+            groupEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const groupElement = groupEl;
+            groupElement.style.transition = 'border-color 0.3s ease';
+            groupElement.style.border = '2px solid var(--primary-color)';
+            setTimeout(() => {
+                groupElement.style.border = '';
+            }, 2000);
+        }
+
+    } catch (e) {
+        const loadingPlaceholder = bodyEl.querySelector('.loading-placeholder');
+        if (loadingPlaceholder) loadingPlaceholder.style.display = 'none';
+        if (contentEl) contentEl.innerHTML = `<div class="p-3 text-danger">Failed to load emails: ${e.message}</div>`;
+    } finally {
+        setTimeout(() => delete groupEl.dataset.toggling, 300);
+    }
 }
 
 // Load Uncertain Emails
 async function loadUncertainEmails() {
     try {
+        showLoading('Loading uncertain emails...');
         const data = await api('/emails?category=uncertain');
         const container = document.getElementById('uncertain-emails');
 
@@ -602,6 +990,8 @@ async function loadUncertainEmails() {
 
     } catch (error) {
         showToast(error.message, 'error');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -618,7 +1008,7 @@ function renderEmailList(emails, containerId, showReviewActions = false) {
 
 // Render Email Card
 function renderEmailCard(email, showReviewActions = false) {
-    const date = email.date ? new Date(email.date).toLocaleDateString() : '';
+    const date = email.date ? new Date(email.date).toLocaleDateString('en-GB') : '';
     const categoryColors = {
         spam: 'background: #fee2e2; color: #dc2626;',
         newsletter: 'background: #dbeafe; color: #2563eb;',
@@ -630,8 +1020,9 @@ function renderEmailCard(email, showReviewActions = false) {
         personal: 'background: #ccfbf1; color: #0d9488;'
     };
 
+    // Added data-sender-email for dynamic stats updates
     return `
-        <div class="email-card ${!email.is_read ? 'unread' : ''}" onclick="openEmail('${email.id}')">
+        <div class="email-card ${!email.is_read ? 'unread' : ''}" onclick="openEmail('${email.id}')" data-id="${email.id}" data-sender-email="${email.sender_email}">
             <div class="email-header">
                 <span class="email-sender">${email.sender || email.sender_email}</span>
                 <span class="email-date">${date}</span>
@@ -675,7 +1066,7 @@ async function openEmail(emailId) {
 
         document.getElementById('modal-subject').textContent = email.subject || '(No Subject)';
         document.getElementById('modal-sender').textContent = `From: ${email.sender} <${email.sender_email}>`;
-        document.getElementById('modal-date').textContent = email.date ? new Date(email.date).toLocaleString() : '';
+        document.getElementById('modal-date').textContent = email.date ? new Date(email.date).toLocaleString('en-GB') : '';
         document.getElementById('modal-preview').textContent = email.body_preview || email.snippet || '';
 
         // Show/hide unsubscribe button
@@ -699,6 +1090,19 @@ async function openEmail(emailId) {
                 method: 'POST',
                 body: JSON.stringify({ email_id: emailId })
             });
+            const summaryEl = document.getElementById('modal-summary');
+            if (summaryEl) {
+                summaryEl.innerHTML = '<i class="ri-robot-line"></i><span>Loading AI summary... (Click "Ask AI" if slow)</span>';
+            }
+
+            // Reset Smart Reply
+            const replyContainer = document.getElementById('reply-container');
+            if (replyContainer) replyContainer.style.display = 'none';
+
+            // Update selection logic
+            if (catSelect) {
+                catSelect.value = email.category || 'uncertain';
+            }
             document.getElementById('modal-summary').innerHTML = `<i class="ri-robot-line"></i><span>${summary.summary}</span>`;
         } catch (e) {
             document.getElementById('modal-summary').innerHTML = `<i class="ri-robot-line"></i><span>${email.snippet}</span>`;
@@ -767,7 +1171,6 @@ async function quickFeedback(emailId, decision) {
 }
 
 // Submit Feedback
-// Submit Feedback
 async function submitFeedback(emailId, decision, correctCategory = null) {
     try {
         const payload = { email_id: emailId, decision };
@@ -793,17 +1196,113 @@ async function changeCategory(newCategory) {
     showToast(`Category updated to ${newCategory}`, 'success');
 }
 
+// Helper to update stats locally without full reload
+function updateLocalStats(senderEmail, delta = -1, isUnread = false) {
+    // 1. Update Sender Group in "By Sender" list
+    const groupEl = document.querySelector(`.sender-group[data-email="${senderEmail}"]`);
+    if (groupEl) {
+        const countValueEl = groupEl.querySelector('.sender-group-stat .value');
+        const unreadValueEl = groupEl.querySelectorAll('.sender-group-stat .value')[1]; // 2nd stat is unread
+
+        if (countValueEl) {
+            let current = parseInt(countValueEl.textContent) || 0;
+            countValueEl.textContent = Math.max(0, current + delta);
+        }
+        if (isUnread && unreadValueEl) {
+            let current = parseInt(unreadValueEl.textContent) || 0;
+            unreadValueEl.textContent = Math.max(0, current + delta);
+        }
+    }
+
+    // 2. Update Top Senders Widget
+    const topSenderEl = document.querySelector(`.clickable-sender[data-email="${senderEmail}"]`);
+    if (topSenderEl) {
+        const badge = topSenderEl.querySelector('.category-badge');
+        const unreadBadge = topSenderEl.querySelector('.category-unread');
+
+        if (badge) {
+            let current = parseInt(badge.textContent) || 0;
+            badge.textContent = Math.max(0, current + delta);
+        }
+        if (isUnread && unreadBadge) {
+            // Extract number from text "X unread"
+            let text = unreadBadge.textContent;
+            let match = text.match(/(\d+)/);
+            let current = match ? parseInt(match[1]) : 0;
+            let newCount = Math.max(0, current + delta);
+            if (newCount > 0) {
+                unreadBadge.textContent = `${newCount} unread`;
+            } else {
+                unreadBadge.remove();
+            }
+        }
+    }
+}
+
 // Delete Email
 async function deleteEmail(emailId) {
+    let btn = null;
+    let originalContent = '';
+
     try {
-        await api('/delete', {
-            method: 'POST',
-            body: JSON.stringify({ email_ids: [emailId] })
+        // Prepare local update data
+        let senderEmail = null;
+        let isUnread = false;
+
+        // Try to get info from active card in DOM
+        const card = document.querySelector(`.email-card[data-id="${emailId}"]`);
+        if (card) {
+            senderEmail = card.dataset.senderEmail;
+            isUnread = card.classList.contains('unread');
+
+            // Visual feedback
+            btn = card.querySelector('.btn-danger');
+            if (btn) {
+                originalContent = btn.innerHTML;
+                btn.classList.add('btn-loading');
+                btn.innerHTML = '<i class="ri-loader-4-line"></i>';
+            }
+        } else if (state.currentEmail && state.currentEmail.id === emailId) {
+            // Or from current modal email
+            senderEmail = state.currentEmail.sender_email;
+            isUnread = !state.currentEmail.is_read;
+        }
+
+        const response = await fetch(`/api/emails/${emailId}`, {
+            method: 'DELETE'
         });
-        showToast('Email deleted', 'success');
-        loadStats();
+        const result = await response.json();
+
+        if (result.success) {
+            // Remove from UI immediately
+            if (card) {
+                card.style.opacity = '0';
+                setTimeout(() => card.remove(), 300);
+            } else if (state.currentEmail && state.currentEmail.id === emailId) {
+                // Close modal if open
+                document.getElementById('email-modal').classList.remove('active');
+            }
+
+            // Update stats
+            updateLocalStats(senderEmail, -1, isUnread);
+            loadStats(); // Logic for global totals is fine to keep async
+            updateGlobalStats(); // Update badges
+
+            showToast('Email deleted', 'success');
+        } else {
+            showToast('Failed to delete email', 'error');
+            if (btn) {
+                btn.classList.remove('btn-loading');
+                btn.innerHTML = originalContent;
+            }
+        }
     } catch (error) {
-        showToast(error.message, 'error');
+        console.error('Error deleting email:', error);
+        showToast('Error deleting email', 'error');
+        if (btn) {
+            btn.classList.remove('btn-loading');
+            btn.innerHTML = originalContent;
+        }
     }
 }
 
@@ -818,37 +1317,125 @@ async function deleteByCategory(category) {
             body: JSON.stringify({ category })
         });
         showToast(`Deleted ${result.success} emails`, 'success');
+        showToast(`Deleted ${result.success} emails`, 'success');
         loadStats();
+        updateGlobalStats();
     } catch (error) {
         showToast(error.message, 'error');
     } finally {
         hideLoading();
+    }
+}
+
+
+
+// Update Global Badge Stats (Sidebar)
+async function updateGlobalStats() {
+    try {
+        const stats = await api('/stats');
+
+        const setBadge = (id, count) => {
+            const el = document.getElementById(id);
+            if (el) {
+                el.innerText = count;
+                el.style.display = count > 0 ? 'inline-flex' : 'none';
+            }
+        };
+
+        setBadge('count-categories', stats.total);
+        setBadge('count-senders', stats.total);
+        setBadge('count-uncertain', stats.uncertain);
+        setBadge('count-subscriptions', stats.subscriptions);
+        setBadge('count-cleanup', stats.cleanup);
+
+    } catch (e) {
+        console.warn('Failed to update stats:', e);
     }
 }
 
 // Delete Sender
 async function deleteSender(senderEmail) {
-    if (!confirm(`Delete all emails from ${senderEmail}?`)) return;
+    // Find the button within the sender group
+    const groupEl = document.querySelector(`.sender-group[data-email="${senderEmail}"]`);
+    let btn = null;
+    if (groupEl) {
+        btn = groupEl.querySelector('.sender-group-actions .btn-danger');
+    }
+
+    // --- Two-Step Confirmation Logic ---
+    if (btn) {
+        if (!btn.dataset.confirming) {
+            // Step 1: Request Confirmation
+            btn.dataset.confirming = 'true';
+            btn.classList.add('btn-confirm-delete');
+            btn.innerHTML = '<i class="ri-check-line"></i>'; // Change to checkmark
+
+            // Auto-revert after 3 seconds
+            btn.dataset.timeoutId = setTimeout(() => {
+                if (btn && btn.dataset.confirming) {
+                    delete btn.dataset.confirming;
+                    delete btn.dataset.timeoutId;
+                    btn.classList.remove('btn-confirm-delete');
+                    btn.innerHTML = '<i class="ri-delete-bin-line"></i>';
+                }
+            }, 3000);
+            return; // Stop here, wait for second click
+        } else {
+            // Step 2: Confirmed!
+            clearTimeout(btn.dataset.timeoutId);
+            delete btn.dataset.confirming;
+            delete btn.dataset.timeoutId;
+            btn.classList.remove('btn-confirm-delete');
+            // Proceed to deletion logic below...
+        }
+    } else {
+        // Fallback for non-DOM calls (shouldn't happen often)
+        if (!confirm(`Delete all emails from ${senderEmail}?`)) return;
+    }
+    // -----------------------------------
+
+    let originalContent = btn ? btn.innerHTML : '';
 
     try {
-        showLoading('Deleting emails...');
+        if (btn) {
+            originalContent = '<i class="ri-delete-bin-line"></i>'; // Revert to trash if fails
+            btn.classList.add('btn-loading');
+            btn.innerHTML = '<i class="ri-loader-4-line"></i>';
+        }
+
         const result = await api('/delete/by-sender', {
             method: 'POST',
             body: JSON.stringify({ sender_email: senderEmail })
         });
-        showToast(`Deleted ${result.success} emails from ${senderEmail}`, 'success');
-        loadSenderGroups();
-        loadStats();
+
+        if (result.success) {
+            showToast(`Deleted ${result.success} emails from ${senderEmail}`, 'success');
+            if (groupEl) {
+                groupEl.style.opacity = '0';
+                setTimeout(() => groupEl.remove(), 300);
+            }
+            loadStats();
+            updateGlobalStats();
+        } else {
+            showToast(result.message || 'Failed to delete emails', 'error');
+            if (btn) {
+                btn.classList.remove('btn-loading');
+                btn.innerHTML = originalContent;
+            }
+        }
+
     } catch (error) {
         showToast(error.message, 'error');
-    } finally {
-        hideLoading();
+        if (btn) {
+            btn.classList.remove('btn-loading');
+            btn.innerHTML = originalContent;
+        }
     }
 }
 
 // Unsubscribe Sender
-async function unsubscribeSender(senderEmail) {
-    if (!confirm(`Unsubscribe from ${senderEmail}?`)) return;
+async function unsubscribeSender(senderName, senderEmail) {
+    if (!confirm(`Unsubscribe from ${senderName || senderEmail}?`)) return;
 
     try {
         showLoading('Unsubscribing...');
@@ -1009,54 +1596,6 @@ function setupSettingsListeners() {
         });
     }
 
-    // Toggle Key Visibility
-    const toggleBtn = document.getElementById('toggle-key');
-    const keyInput = document.getElementById('gemini-key');
-    if (toggleBtn && keyInput) {
-        toggleBtn.addEventListener('click', () => {
-            const type = keyInput.type === 'password' ? 'text' : 'password';
-            keyInput.type = type;
-            toggleBtn.innerHTML = type === 'password' ? '<i class="ri-eye-line"></i>' : '<i class="ri-eye-off-line"></i>';
-        });
-    }
-
-    // Save API Key
-    const saveApiBtn = document.getElementById('save-api-btn');
-    if (saveApiBtn && keyInput) {
-        saveApiBtn.addEventListener('click', () => {
-            if (keyInput.value.trim()) {
-                saveSetting('gemini_api_key', keyInput.value);
-            } else {
-                showToast('Please enter an API key', 'info');
-            }
-        });
-    }
-
-    // Delete API Key Button
-    const deleteKeyBtn = document.getElementById('delete-key-btn');
-    if (deleteKeyBtn && keyInput) {
-        deleteKeyBtn.addEventListener('click', async () => {
-            if (confirm('Are you sure you want to delete the API key?')) {
-                try {
-                    const response = await fetch('/api/settings', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ gemini_api_key: '' })
-                    });
-                    if (response.ok) {
-                        keyInput.value = '';
-                        showToast('API Key deleted', 'success');
-                    } else {
-                        showToast('Failed to delete API key', 'error');
-                    }
-                } catch (error) {
-                    showToast('Error deleting API key', 'error');
-                }
-            }
-        });
-    }
-
-
     // Reset Account Button
     const resetBtn = document.getElementById('reset-account-btn');
     if (resetBtn) {
@@ -1099,9 +1638,7 @@ async function saveSetting(key, value) {
         });
 
         if (response.ok) {
-            if (key === 'gemini_api_key') {
-                showToast('API Key saved successfully', 'success');
-            }
+            // Success
         } else {
             showToast('Failed to save settings', 'error');
         }
@@ -1138,11 +1675,7 @@ async function loadSettings() {
             document.documentElement.style.setProperty('--primary', settings.accent_color);
         }
 
-        // Apply API Key
-        const keyInput = document.getElementById('gemini-key');
-        if (settings.gemini_api_key && keyInput) {
-            keyInput.value = settings.gemini_api_key;
-        }
+
 
     } catch (error) {
         console.error('Failed to load settings:', error);
@@ -1297,6 +1830,80 @@ async function summarizeCategory() {
         `;
     } finally {
         if (btn) btn.disabled = false;
+    }
+}
+
+// Analyze Subscriptions with AI
+async function analyzeSubscriptions() {
+    const btn = document.getElementById('ai-analyze-subs');
+    const originalText = btn.innerHTML;
+    const list = document.getElementById('subscription-list');
+
+    // Scrape current subscriptions from the table (or we could fetch again, but scraping is faster)
+    // Actually, improved way: fetch the data again but keep it in memory
+
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="ri-loader-4-line ri-spin"></i> Analyzing...';
+
+        const subs = await api('/subscriptions');
+
+        const result = await api('/analyze/subscriptions', {
+            method: 'POST',
+            body: JSON.stringify({ candidates: subs })
+        });
+
+        console.log('Analysis Result:', result);
+
+        // Re-render table with badges
+        const html = subs.map(sub => {
+            const advice = result[sub.sender_email];
+            let adviceBadge = '';
+
+            if (advice) {
+                const color = advice.recommendation === 'UNSUBSCRIBE' ? 'var(--danger)' : 'var(--success)';
+                adviceBadge = `
+                    <div class="ai-advice-badge" style="display:inline-block; margin-top:5px; padding: 2px 8px; border-radius:12px; font-size: 0.75em; background: ${color}20; color: ${color}; border: 1px solid ${color};" title="${advice.reason}">
+                        <i class="ri-magic-line"></i> ${advice.recommendation}
+                    </div>
+                `;
+            }
+
+            return `
+            <tr>
+                <td>
+                    <div style="font-weight:500">${sub.sender || 'Unknown'}</div>
+                    <div style="font-size:0.85em; color:var(--text-muted)">${sub.sender_email}</div>
+                    ${adviceBadge}
+                </td>
+                <td>
+                    <div>${sub.count} <span style="color:var(--warning); font-size:0.9em">(${sub.unread_count} unread)</span></div>
+                </td>
+                <td>
+                     <div title="Last Received: ${formatDate(sub.last_received_date)}">${sub.last_read_date ? formatDate(sub.last_read_date) : '<span style="opacity:0.5">Never read</span>'}</div>
+                </td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick="unsubscribeSender('${sub.sender}', '${sub.sender_email}')">
+                        <i class="ri-mail-close-line"></i> Unsubscribe
+                    </button>
+                    ${sub.unsubscribe_link ? `
+                    <a href="${sub.unsubscribe_link}" target="_blank" class="btn btn-sm btn-secondary" style="margin-left:5px">
+                        <i class="ri-external-link-line"></i>
+                    </a>` : ''}
+                </td>
+            </tr>
+        `}).join('');
+
+        list.innerHTML = html;
+        showToast('Analysis complete!', 'success');
+
+    } catch (e) {
+        showToast('Analysis failed: ' + e.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
     }
 }
 

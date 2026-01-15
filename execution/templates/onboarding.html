@@ -45,7 +45,7 @@
                     <i class="ri-robot-line"></i>
                     <div>
                         <strong>AI Summaries</strong>
-                        <span>Quick email summaries with Gemini</span>
+                        <span>Quick email summaries with Local AI</span>
                     </div>
                 </div>
                 <div class="feature-item">
@@ -238,30 +238,7 @@
                 </div>
             </div>
 
-            <!-- Optional: Gemini API Key -->
-            <div class="optional-section">
-                <div class="optional-header" onclick="toggleGemini()">
-                    <i class="ri-robot-line"></i>
-                    <span>Add Gemini AI for Summaries (Optional)</span>
-                    <i class="ri-arrow-down-s-line toggle-icon" id="gemini-toggle"></i>
-                </div>
-                <div class="optional-content" id="gemini-section">
-                    <p>Get AI-powered email summaries with your Gemini Pro subscription.</p>
-                    <a href="https://aistudio.google.com/apikey" target="_blank" class="btn btn-secondary btn-sm">
-                        <i class="ri-external-link-line"></i> Get API Key
-                    </a>
-                    <div class="api-key-input">
-                        <input type="password" id="gemini-key" placeholder="Paste Gemini API key">
-                        <button class="btn btn-sm" onclick="toggleKeyVisibility()">
-                            <i class="ri-eye-line" id="eye-icon"></i>
-                        </button>
-                    </div>
-                    <button class="btn btn-secondary btn-sm" onclick="saveGeminiKey()" style="margin-top: 8px;">
-                        <i class="ri-save-line"></i> Save Key
-                    </button>
-                    <div id="gemini-status" class="upload-status"></div>
-                </div>
-            </div>
+
 
             <div class="final-actions">
                 <a href="{{ url_for('login') }}" class="btn btn-primary btn-large">
@@ -335,114 +312,7 @@
         }
     }
 
-    function toggleGemini() {
-        const section = document.getElementById('gemini-section');
-        const toggle = document.getElementById('gemini-toggle');
-        section.classList.toggle('visible');
-        toggle.style.transform = section.classList.contains('visible') ? 'rotate(180deg)' : '';
-    }
 
-    async function handleCredentialsUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const statusEl = document.getElementById('upload-status');
-        const nextBtn = document.getElementById('step2-next');
-
-        statusEl.innerHTML = '<i class="ri-loader-4-line spinning"></i> Uploading...';
-        statusEl.className = 'upload-status loading';
-
-        const formData = new FormData();
-        formData.append('credentials', file);
-
-        try {
-            const response = await fetch('/api/setup/credentials', {
-                method: 'POST',
-                body: formData
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                statusEl.innerHTML = '<i class="ri-checkbox-circle-line"></i> Credentials uploaded! Click Continue.';
-                statusEl.className = 'upload-status success';
-                credentialsUploaded = true;
-                nextBtn.disabled = false;
-
-                // Mark step 5 as done
-                markDone(5);
-
-                // Auto-proceed after short delay
-                setTimeout(() => nextStep(), 1000);
-            } else {
-                statusEl.innerHTML = '<i class="ri-error-warning-line"></i> ' + result.error;
-                statusEl.className = 'upload-status error';
-            }
-        } catch (error) {
-            statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Upload failed. Please try again.';
-            statusEl.className = 'upload-status error';
-        }
-    }
-
-    async function saveGeminiKey() {
-        const keyInput = document.getElementById('gemini-key');
-        const statusEl = document.getElementById('gemini-status');
-        const key = keyInput.value.trim();
-
-        if (!key) {
-            statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Please enter an API key';
-            statusEl.className = 'upload-status error';
-            return;
-        }
-
-        statusEl.innerHTML = '<i class="ri-loader-4-line spinning"></i> Validating...';
-        statusEl.className = 'upload-status loading';
-
-        try {
-            const response = await fetch('/api/setup/gemini', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ api_key: key })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                statusEl.innerHTML = '<i class="ri-checkbox-circle-line"></i> API key saved!';
-                statusEl.className = 'upload-status success';
-            } else {
-                statusEl.innerHTML = '<i class="ri-error-warning-line"></i> ' + result.error;
-                statusEl.className = 'upload-status error';
-            }
-        } catch (error) {
-            statusEl.innerHTML = '<i class="ri-error-warning-line"></i> Failed to save key.';
-            statusEl.className = 'upload-status error';
-        }
-    }
-
-    function copyRedirectURI() {
-        const uri = document.getElementById('redirect-uri').textContent;
-        navigator.clipboard.writeText(uri).then(() => {
-            const icon = document.getElementById('copy-icon');
-            icon.className = 'ri-check-line';
-            setTimeout(() => {
-                icon.className = 'ri-file-copy-line';
-            }, 2000);
-        });
-    }
-
-    function toggleKeyVisibility() {
-        const input = document.getElementById('gemini-key');
-        const icon = document.getElementById('eye-icon');
-
-        if (input.type === 'password') {
-            input.type = 'text';
-            icon.className = 'ri-eye-off-line';
-        } else {
-            input.type = 'password';
-            icon.className = 'ri-eye-line';
-        }
-    }
 
     // Drag and drop
     const uploadArea = document.getElementById('credentials-upload');

@@ -17,19 +17,24 @@
             </a>
             <a href="#" class="nav-item" data-view="categories">
                 <i class="ri-folder-line"></i>
-                <span>Categories</span>
+                <span>Categories <span id="count-categories" class="nav-badge" style="display:none">0</span></span>
             </a>
             <a href="#" class="nav-item" data-view="senders">
                 <i class="ri-group-line"></i>
-                <span>By Sender</span>
+                <span>By Sender <span id="count-senders" class="nav-badge" style="display:none">0</span></span>
             </a>
             <a href="#" class="nav-item" data-view="uncertain">
                 <i class="ri-question-mark"></i>
-                <span>Uncertain</span>
+                <span>Uncertain <span id="count-uncertain" class="nav-badge" style="display:none">0</span></span>
+            </a>
+            <a href="#" class="nav-item" data-view="subscriptions">
+                <i class="ri-newspaper-line"></i>
+                <span>Subscriptions <span id="count-subscriptions" class="nav-badge"
+                        style="display:none">0</span></span>
             </a>
             <a href="#" class="nav-item" data-view="cleanup">
                 <i class="ri-sparkling-line"></i>
-                <span>AI Cleanup</span>
+                <span>AI Cleanup <span id="count-cleanup" class="nav-badge" style="display:none">0</span></span>
             </a>
             <a href="#" class="nav-item" data-view="settings">
                 <i class="ri-settings-3-line"></i>
@@ -99,13 +104,29 @@
 
         <!-- Overview View -->
         <div id="overview-view" class="view active">
+
+            <!-- Inbox Mood Widget -->
+            <div class="stat-card mood-card"
+                style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 1rem; border-left: 4px solid var(--border-color); background: var(--bg-card);">
+                <div class="stat-icon" id="mood-icon"
+                    style="background:none; font-size:2rem; width: auto; height: auto;">
+                    {{ stats.mood.emoji if stats.mood else '😐' }}
+                </div>
+                <div class="stat-info">
+                    <span class="stat-value" id="mood-text" style="font-size: 1.25rem;">{{ stats.mood.text if stats.mood
+                        else 'Balanced' }}</span>
+                    <span class="stat-label" id="mood-desc" style="font-size:0.85rem; opacity: 0.8;">{{ stats.mood.desc
+                        if stats.mood else 'Your inbox is mixed.' }}</span>
+                </div>
+            </div>
+
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-icon blue">
                         <i class="ri-mail-line"></i>
                     </div>
                     <div class="stat-info">
-                        <span class="stat-value" id="total-emails">0</span>
+                        <span class="stat-value" id="total-emails">{{ stats.total_emails|default(0) }}</span>
                         <span class="stat-label">Total Emails</span>
                     </div>
                 </div>
@@ -114,7 +135,7 @@
                         <i class="ri-mail-unread-line"></i>
                     </div>
                     <div class="stat-info">
-                        <span class="stat-value" id="total-unread">0</span>
+                        <span class="stat-value" id="total-unread">{{ stats.total_unread|default(0) }}</span>
                         <span class="stat-label">Unread</span>
                     </div>
                 </div>
@@ -123,7 +144,7 @@
                         <i class="ri-delete-bin-line"></i>
                     </div>
                     <div class="stat-info">
-                        <span class="stat-value" id="deletable">0</span>
+                        <span class="stat-value" id="deletable">{{ stats.deletable|default(0) }}</span>
                         <span class="stat-label">Deletable</span>
                     </div>
                 </div>
@@ -132,13 +153,37 @@
                         <i class="ri-shield-check-line"></i>
                     </div>
                     <div class="stat-info">
-                        <span class="stat-value" id="would-keep">0</span>
+                        <span class="stat-value" id="would-keep">{{ stats.would_keep|default(0) }}</span>
                         <span class="stat-label">Keep</span>
                     </div>
                 </div>
             </div>
 
-            <div class="content-grid">
+            <!-- Leaderboard Section -->
+            <div class="card leaderboard-card" style="margin-top: 2rem;">
+                <div class="card-header">
+                    <h3>🏆 Hall of Shame</h3>
+                </div>
+                <div class="card-content"
+                    style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; padding: 1rem;">
+                    <!-- Most Chatty -->
+                    <div>
+                        <h4 style="margin-bottom: 1rem; color: var(--text-secondary);">📢 Most Chatty</h4>
+                        <ul id="leaderboard-chatty"
+                            style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.5rem;">
+                        </ul>
+                    </div>
+                    <!-- Top Spammers -->
+                    <div>
+                        <h4 style="margin-bottom: 1rem; color: var(--text-secondary);">🗑️ Most Ignored</h4>
+                        <ul id="leaderboard-spammers"
+                            style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.5rem;">
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content-grid flush-grid">
                 <div class="card categories-card">
                     <div class="card-header">
                         <h3>Email Categories</h3>
@@ -153,7 +198,31 @@
                         <h3>Top Senders</h3>
                     </div>
                     <div class="card-content" id="top-senders">
-                        <!-- Top senders will be populated here -->
+                        <!-- Top senders (SSR) -->
+                        {% if stats.top_senders %}
+                        {% for sender in stats.top_senders %}
+                        <div class="category-item clickable-sender" data-email="{{ sender.email }}">
+                            <div class="category-info">
+                                <div class="category-icon personal">
+                                    <i class="ri-user-line"></i>
+                                </div>
+                                <div class="sender-details" style="display: flex; flex-direction: column;">
+                                    <span class="category-name">{{ sender.name or sender.email }}</span>
+                                    <span style="font-size: 11px; color: var(--text-muted);">{{ sender.email }}</span>
+                                </div>
+                            </div>
+                            <div class="category-count">
+                                {% if sender.unread > 0 %}
+                                <span class="category-unread">{{ sender.unread }} unread</span>
+                                {% endif %}
+                                <span class="category-badge">{{ sender.count }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% else %}
+                        <p style="color: var(--text-muted); text-align: center; padding: 20px;">No sender data
+                            available.</p>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -242,169 +311,209 @@
                     </div>
                 </div>
 
-                <div class="form-group setting-col">
-                    <label class="setting-label">Gemini API Key</label>
-                    <div class="api-input-wrapper">
-                        <div class="api-key-input-group">
-                            <input type="password" id="gemini-key" placeholder="Enter API Key"
-                                class="refined-input api-key-field">
-                            <button class="btn btn-icon-only remove-key-btn" id="remove-key-btn" title="Remove API Key">
-                                <i class="ri-delete-bin-line"></i>
+                <!-- Gemini API Key Removed (Using Ollama) -->
+
+
+                <!-- Premium AI Training Section -->
+                <div class="ai-training-card">
+                    <div class="ai-card-content">
+                        <div class="ai-card-info">
+                            <h3><i class="ri-brain-2-fill"></i> Adaptive AI Model</h3>
+                            <p>
+                                MailCleaner learns from your corrections to improve future categorization.
+                                Retraining updates the local model with your latest feedback for better accuracy.
+                            </p>
+                        </div>
+                        <div class="ai-card-actions">
+                            <button class="btn btn-primary" onclick="trainModel()">
+                                <i class="ri-flashlight-line"></i>
+                                Retrain Model Now
                             </button>
                         </div>
-                        <button type="button" id="toggle-key" class="btn btn-icon" title="Show/Hide">
-                            <i class="ri-eye-line"></i>
-                        </button>
-                        <button type="button" id="save-api-btn" class="btn btn-primary">
-                            Save Key
-                        </button>
                     </div>
                 </div>
 
 
-            </div>
-
-            <div class="form-group setting-row"
-                style="margin-top: 2rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
-                <label class="setting-label">Local AI Training</label>
-                <div style="flex: 1;">
-                    <p style="font-size: 0.9em; color: var(--text-muted); margin-bottom: 0.5rem;">
-                        Improve classification by training the model on your corrected emails.
+                <!-- Danger Zone -->
+                <div class="danger-zone-section"
+                    style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border-color);">
+                    <label class="setting-label"
+                        style="color: var(--danger); display: block; margin-bottom: 8px;">Danger
+                        Zone</label>
+                    <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                        Deleting your credentials will log you out and require a fresh setup.
+                        Your local email cache will remain, but you won't be able to fetch new emails.
                     </p>
-                    <button class="btn btn-primary" onclick="trainModel()">
-                        <i class="ri-brain-line"></i>
-                        Train Model Now
+                    <button id="reset-account-btn" class="btn btn-danger" style="width: 100%;">
+                        <i class="ri-delete-bin-line"></i>
+                        Reset Account & Delete Credentials
                     </button>
                 </div>
             </div>
+        </div>
+
+        <!-- Subscriptions View -->
+        <div id="subscriptions-view" class="view">
+            <div class="section-header"
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2>Newsletter Audit</h2>
+                <div class="header-actions" style="display: flex; gap: 10px;">
+                    <button class="btn btn-primary" id="ai-analyze-subs">
+                        <i class="ri-magic-line"></i> AI Analyze
+                    </button>
+                </div>
+            </div>
+            <div class="card full-height-card">
+                <div class="card-content subscription-table-container" style="max-height: none; padding: 0;">
+                    <table class="table" style="width:100%">
+                        <thead>
+                            <tr>
+                                <th>Sender</th>
+                                <th>Total (Unread)</th>
+                                <th>Last Read</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="subscription-list"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
 
 
-            <!-- Danger Zone -->
-            <div class="danger-zone-section"
-                style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border-color);">
-                <label class="setting-label" style="color: var(--danger); display: block; margin-bottom: 8px;">Danger
-                    Zone</label>
-                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
-                    Deleting your credentials will log you out and require a fresh setup.
-                    Your local email cache will remain, but you won't be able to fetch new emails.
-                </p>
-                <button id="reset-account-btn" class="btn btn-danger" style="width: 100%;">
+        <!-- AI Cleanup View -->
+        <div id="cleanup-view" class="view">
+            <div class="section-header">
+                <h2>AI Cleanup Suggestions</h2>
+                <button class="btn btn-primary" onclick="loadCleanupSuggestions()">
+                    <i class="ri-refresh-line"></i> Refresh Suggestions
+                </button>
+            </div>
+            <div id="cleanup-intro" class="glass-panel" style="margin-bottom: 2rem; padding: 2rem; text-align: center;">
+                <i class="ri-robot-line" style="font-size: 3rem; color: var(--primary-color);"></i>
+                <h3>Let AI Clean Your Inbox</h3>
+                <p>The AI will scan your "Uncertain" and promotional emails to identify junk.</p>
+                <button class="btn btn-primary btn-lg" style="margin-top: 1rem;" onclick="loadCleanupSuggestions()">
+                    Start Scan
+                </button>
+            </div>
+            <div id="cleanup-results" class="cleanup-grid"></div>
+        </div>
+    </main>
+
+    <!-- Email Detail Modal -->
+    <div id="email-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-subject">Email Subject</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <i class="ri-close-line"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="email-meta">
+                    <span id="modal-sender"></span>
+                    <span id="modal-date"></span>
+                    <select id="modal-category-select" class="form-select" onchange="changeCategory(this.value)"
+                        style="margin-left: auto; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-color);">
+                        <option value="spam">Spam</option>
+                        <option value="newsletter">Newsletter</option>
+                        <option value="ads">Ads</option>
+                        <option value="social">Social</option>
+                        <option value="promotions">Promotions</option>
+                        <option value="important">Important</option>
+                        <option value="personal">Personal</option>
+                        <option value="uncertain">Uncertain</option>
+                    </select>
+                </div>
+                <div class="email-summary" id="modal-summary">
+                    <i class="ri-robot-line"></i>
+                    <span>Loading AI summary...</span>
+                </div>
+                <div class="email-preview" id="modal-preview"></div>
+
+                <!-- Smart Reply -->
+                <div class="smart-reply-section"
+                    style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                    <h4 style="margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">✍️ Smart
+                        Reply</h4>
+                    <div class="reply-buttons" style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <button class="btn btn-sm" style="border: 1px solid var(--border-color);"
+                            onclick="generateReply('polite')">Polite</button>
+                        <button class="btn btn-sm" style="border: 1px solid var(--border-color);"
+                            onclick="generateReply('agree')">Agree</button>
+                        <button class="btn btn-sm" style="border: 1px solid var(--border-color);"
+                            onclick="generateReply('decline')">Decline</button>
+                    </div>
+                    <div id="reply-container"
+                        style="display:none; background: var(--bg-body); padding: 0.5rem; border-radius: 4px; position: relative;">
+                        <div id="reply-loading" style="display:none; text-align:center; padding: 10px;">
+                            <i class="ri-loader-4-line spin"></i> Generating...
+                        </div>
+                        <p id="reply-text"
+                            style="font-size: 0.9rem; margin: 0; white-space: pre-wrap; font-family: sans-serif; color: var(--text-primary);">
+                        </p>
+                        <button class="btn btn-sm btn-ghost" onclick="copyReply()"
+                            style="position: absolute; top: 5px; right: 5px;" title="Copy">
+                            <i class="ri-file-copy-line"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-success" onclick="markKeep()">
+                    <i class="ri-check-line"></i>
+                    Keep
+                </button>
+                <button class="btn btn-danger" onclick="markDelete()">
                     <i class="ri-delete-bin-line"></i>
-                    Reset Account & Delete Credentials
+                    Delete
+                </button>
+                <button class="btn btn-warning" id="modal-unsubscribe" onclick="unsubscribe()">
+                    <i class="ri-mail-close-line"></i>
+                    Unsubscribe
+                </button>
+                <button class="btn btn-primary" onclick="askAI()">
+                    <i class="ri-sparkling-fill"></i>
+                    Ask AI
                 </button>
             </div>
         </div>
-</div>
-
-<!-- AI Cleanup View -->
-<div id="cleanup-view" class="view">
-    <div class="section-header">
-        <h2>AI Cleanup Suggestions</h2>
-        <button class="btn btn-primary" onclick="loadCleanupSuggestions()">
-            <i class="ri-refresh-line"></i> Refresh Suggestions
-        </button>
     </div>
-    <div id="cleanup-intro" class="glass-panel" style="margin-bottom: 2rem; padding: 2rem; text-align: center;">
-        <i class="ri-robot-line" style="font-size: 3rem; color: var(--primary-color);"></i>
-        <h3>Let AI Clean Your Inbox</h3>
-        <p>The AI will scan your "Uncertain" and promotional emails to identify junk.</p>
-        <button class="btn btn-primary btn-lg" style="margin-top: 1rem;" onclick="loadCleanupSuggestions()">
-            Start Scan
-        </button>
-    </div>
-    <div id="cleanup-loading" style="display:none; text-align:center; padding:4rem;">
-        <i class="ri-loader-4-line spin" style="font-size:3rem; color: var(--primary-color);"></i>
-        <p style="margin-top: 1rem;">Analyzing emails with Local LLM...</p>
-    </div>
-    <div id="cleanup-results" class="email-list"></div>
-</div>
 
-
-<!-- Email Detail Modal -->
-<div id="email-modal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="modal-subject">Email Subject</h3>
-            <button class="modal-close" onclick="closeModal()">
-                <i class="ri-close-line"></i>
-            </button>
-        </div>
-        <div class="modal-body">
-            <div class="email-meta">
-                <span id="modal-sender"></span>
-                <span id="modal-date"></span>
-                <select id="modal-category-select" class="form-select" onchange="changeCategory(this.value)"
-                    style="margin-left: auto; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-color);">
-                    <option value="spam">Spam</option>
-                    <option value="newsletter">Newsletter</option>
-                    <option value="ads">Ads</option>
-                    <option value="social">Social</option>
-                    <option value="promotions">Promotions</option>
-                    <option value="important">Important</option>
-                    <option value="personal">Personal</option>
-                    <option value="uncertain">Uncertain</option>
-                </select>
-            </div>
-            <div class="email-summary" id="modal-summary">
-                <i class="ri-robot-line"></i>
-                <span>Loading AI summary...</span>
-            </div>
-            <div class="email-preview" id="modal-preview"></div>
-        </div>
-        <div class="modal-actions">
-            <button class="btn btn-success" onclick="markKeep()">
-                <i class="ri-check-line"></i>
-                Keep
-            </button>
-            <button class="btn btn-danger" onclick="markDelete()">
-                <i class="ri-delete-bin-line"></i>
-                Delete
-            </button>
-            <button class="btn btn-warning" id="modal-unsubscribe" onclick="unsubscribe()">
-                <i class="ri-mail-close-line"></i>
-                Unsubscribe
-            </button>
-            <button class="btn btn-primary" onclick="askAI()">
-                <i class="ri-sparkling-fill"></i>
-                Ask AI
-            </button>
-        </div>
-    </div>
-</div>
-
-<!-- AI Summary Modal -->
-<div id="ai-modal" class="modal">
-    <div class="modal-content glass-panel" style="max-width: 800px;">
-        <span class="close-btn" onclick="closeAIModal()">&times;</span>
-        <h2 id="ai-modal-title" style="margin-bottom: 1rem;"><i class="ri-sparkling-fill gradient-text"></i> AI
-            Analysis</h2>
-        <div id="ai-modal-body" class="markdown-body" style="line-height: 1.6;">
-            <!-- Content -->
-        </div>
-    </div>
-</div>
-
-<!-- Loading Overlay -->
-<div id="loading-overlay" class="loading-overlay">
-    <div class="loading-spinner">
-        <i class="ri-loader-4-line" id="loading-icon"></i>
-        <span id="loading-text">Syncing Emails...</span>
-
-        <div id="sync-progress-container" class="progress-container" style="display: none;">
-            <div class="progress-bar-wrapper">
-                <div id="sync-progress-bar" class="progress-bar-fill"></div>
-            </div>
-            <div class="progress-stats">
-                <span id="sync-count">0 / 0</span>
-                <span id="sync-percent">0%</span>
+    <!-- AI Summary Modal -->
+    <div id="ai-modal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 800px;">
+            <span class="close-btn" onclick="closeAIModal()">&times;</span>
+            <h2 id="ai-modal-title" style="margin-bottom: 1rem;"><i class="ri-sparkling-fill gradient-text"></i> AI
+                Analysis</h2>
+            <div id="ai-modal-body" class="markdown-body" style="line-height: 1.6;">
+                <!-- Content -->
             </div>
         </div>
-
-        <button id="stop-sync-btn" class="btn btn-danger btn-sm" style="display: none;">Stop Sync</button>
     </div>
-</div>
 
-<!-- Toast Notifications -->
-<div id="toast-container" class="toast-container"></div>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <i class="ri-loader-4-line" id="loading-icon"></i>
+            <span id="loading-text">Syncing Emails...</span>
+
+            <div id="sync-progress-container" class="progress-container" style="display: none;">
+                <div class="progress-bar-wrapper">
+                    <div id="sync-progress-bar" class="progress-bar-fill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span id="sync-count">0 / 0</span>
+                    <span id="sync-percent">0%</span>
+                </div>
+            </div>
+
+            <button id="stop-sync-btn" class="btn btn-danger btn-sm" style="display: none;">Stop Sync</button>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
 </div>
 {% endblock %}
