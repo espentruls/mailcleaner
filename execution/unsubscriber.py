@@ -6,6 +6,8 @@ Handles both mailto: and http: unsubscribe methods.
 import re
 import requests
 import smtplib
+import concurrent.futures
+import threading
 from email.mime.text import MIMEText
 from typing import Optional, Tuple
 from urllib.parse import urlparse, parse_qs
@@ -28,6 +30,8 @@ class UnsubscribeHandler:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        self._gmail_lock = threading.Lock()
+        self._db_lock = threading.Lock()
 
     def can_unsubscribe(self, email: Email) -> bool:
         """Check if we can automatically unsubscribe from this sender."""
@@ -129,10 +133,11 @@ class UnsubscribeHandler:
                 mailto = base_email
 
             # Send via Gmail API
-            success = self.gmail_client.send_unsubscribe_email(
-                to_email=mailto,
-                subject=subject
-            )
+            with self._gmail_lock:
+                success = self.gmail_client.send_unsubscribe_email(
+                    to_email=mailto,
+                    subject=subject
+                )
 
             if success:
                 return True, f"Unsubscribe email sent to {mailto}"
@@ -146,14 +151,31 @@ class UnsubscribeHandler:
                     success: bool, error: str = None):
         """Log unsubscribe attempt to database."""
         if self.db:
-            self.db.log_unsubscribe(
-                email_id=email.id,
-                sender_email=email.sender_email,
-                method=method,
-                target=target,
-                success=success,
-                error_message=error
-            )
+            with self._db_lock:
+                self.db.log_unsubscribe(
+                    email_id=email.id,
+                    sender_email=email.sender_email,
+                    method=method,
+                    target=target,
+                    success=success,
+                    error_message=error
+                )
+
+    def _process_unsubscribe_task(self, sender_email: str, email: Email) -> Tuple[str, dict]:
+        """Helper to process a single unsubscribe task."""
+        if self.can_unsubscribe(email):
+            success, message = self.unsubscribe(email)
+            return sender_email, {
+                'success': success,
+                'message': message,
+                'method': 'http' if email.unsubscribe_link else 'mailto'
+            }
+        else:
+            return sender_email, {
+                'success': False,
+                'message': 'No unsubscribe method available',
+                'method': None
+            }
 
     def batch_unsubscribe(self, emails: list) -> dict:
         """
@@ -168,20 +190,16 @@ class UnsubscribeHandler:
             if email.sender_email not in senders:
                 senders[email.sender_email] = email
 
-        for sender_email, email in senders.items():
-            if self.can_unsubscribe(email):
-                success, message = self.unsubscribe(email)
-                results[sender_email] = {
-                    'success': success,
-                    'message': message,
-                    'method': 'http' if email.unsubscribe_link else 'mailto'
-                }
-            else:
-                results[sender_email] = {
-                    'success': False,
-                    'message': 'No unsubscribe method available',
-                    'method': None
-                }
+        # Process in parallel using ThreadPoolExecutor
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_sender = {
+                executor.submit(self._process_unsubscribe_task, sender_email, email): sender_email
+                for sender_email, email in senders.items()
+            }
+
+            for future in concurrent.futures.as_completed(future_to_sender):
+                sender_email, result = future.result()
+                results[sender_email] = result
 
         return results
 
