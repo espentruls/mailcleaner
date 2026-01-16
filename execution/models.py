@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from typing import Optional, List
+from typing import Optional, List, Dict
 from enum import Enum
 
 
@@ -252,6 +252,34 @@ class Database:
                 (sender_email, limit, offset)
             ).fetchall()
             return [self._row_to_email(row) for row in rows]
+
+    def get_recent_emails_for_senders(self, sender_emails: List[str], limit_per_sender: int = 5) -> Dict[str, List[Email]]:
+        if not sender_emails:
+            return {}
+
+        placeholders = ','.join('?' * len(sender_emails))
+        query = f"""
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY sender_email ORDER BY date DESC) as rn
+                FROM emails
+                WHERE sender_email IN ({placeholders})
+                  AND (user_action IS NULL OR user_action != 'delete')
+            ) WHERE rn <= ?
+        """
+
+        args = sender_emails + [limit_per_sender]
+
+        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, args).fetchall()
+
+            result = {email: [] for email in sender_emails}
+            for row in rows:
+                email = self._row_to_email(row)
+                if email.sender_email in result:
+                    result[email.sender_email].append(email)
+
+            return result
 
     def get_email_ids_by_sender(self, sender_email: str) -> List[str]:
         with sqlite3.connect(self.db_path, timeout=30.0) as conn:
@@ -559,41 +587,49 @@ class Database:
             }
 
     def get_subscription_stats(self, limit: int = 20):
-        """Get newsletter stats."""
+        """
+        Get newsletter stats, optimized to fetch unsubscribe links in a single query.
+        """
         with sqlite3.connect(self.db_path, timeout=30.0) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
-            # Find senders with > 1 emails in newsletter/promotions
-            rows = cursor.execute(f"""
-                SELECT 
-                    sender_email, 
-                    sender, 
-                    COUNT(*) as count, 
-                    SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread_count,
-                    MAX(CASE WHEN is_read = 1 THEN date ELSE NULL END) as last_read_date,
-                    MAX(date) as last_received_date,
-                    MAX(id) as sample_id
-                FROM emails 
-                WHERE category IN ('newsletter', 'promotions') AND (user_action IS NULL OR user_action != 'delete')
-                GROUP BY sender_email 
+
+            # This query uses a Common Table Expression (CTE) to find the latest
+            # email for each sender and then joins it back to the main query.
+            # This avoids the N+1 problem of querying for each sender's unsubscribe link.
+            query = """
+                WITH latest_emails AS (
+                    SELECT
+                        sender_email,
+                        unsubscribe_link,
+                        unsubscribe_email,
+                        ROW_NUMBER() OVER(PARTITION BY sender_email ORDER BY date DESC) as rn
+                    FROM emails
+                    WHERE category IN ('newsletter', 'promotions')
+                      AND (user_action IS NULL OR user_action != 'delete')
+                )
+                SELECT
+                    e.sender_email,
+                    MAX(e.sender) as sender,
+                    COUNT(e.id) as count,
+                    SUM(CASE WHEN e.is_read = 0 THEN 1 ELSE 0 END) as unread_count,
+                    MAX(CASE WHEN e.is_read = 1 THEN e.date ELSE NULL END) as last_read_date,
+                    MAX(e.date) as last_received_date,
+                    le.unsubscribe_link,
+                    le.unsubscribe_email
+                FROM emails e
+                JOIN latest_emails le ON e.sender_email = le.sender_email AND le.rn = 1
+                WHERE e.category IN ('newsletter', 'promotions')
+                  AND (e.user_action IS NULL OR e.user_action != 'delete')
+                GROUP BY e.sender_email
                 HAVING count > 1
                 ORDER BY count DESC
-                LIMIT {limit}
-            """).fetchall()
+                LIMIT ?
+            """
+
+            rows = cursor.execute(query, (limit,)).fetchall()
             
-            # Get unsubscribe links from sample emails
-            results = []
-            for row in rows:
-                r = dict(row)
-                # Try to get unsubscribe link from latest email
-                sample = cursor.execute("SELECT unsubscribe_link, unsubscribe_email FROM emails WHERE sender_email = ? ORDER BY date DESC LIMIT 1", (r['sender_email'],)).fetchone()
-                if sample:
-                    r['unsubscribe_link'] = sample['unsubscribe_link']
-                    r['unsubscribe_email'] = sample['unsubscribe_email']
-                results.append(r)
-                
-            return results
+            return [dict(row) for row in rows]
 
     def get_global_counts(self):
         """Get global counts for UI badges."""
