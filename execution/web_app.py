@@ -889,27 +889,47 @@ def api_suggest_deletions():
     
     try:
         # Gather candidates from clutter categories
-        categories = ['spam', 'ads', 'promotions', 'uncertain']
+        categories_str = ['spam', 'ads', 'promotions', 'uncertain']
+        
+        # Convert strings to Enums
+        target_categories = []
+        for cat in categories_str:
+            try:
+                target_categories.append(EmailCategory(cat))
+            except ValueError:
+                pass
+
+        # Optimization: Single query using UNION ALL instead of loop
+        # Fetch top 5 for each category efficiently
+        all_emails = db.get_emails_by_categories_diverse(target_categories, limit_per_category=5)
+
+        # Process in Python to preserve exact order preference:
+        # spam -> ads -> promotions -> uncertain
+        # and ensure uniqueness (though IDs should be unique from DB)
+
         candidates = []
         seen_ids = set()
-        
-        for cat in categories:
-            # Get recent emails (convert string to EmailCategory enum)
-            try:
-                cat_enum = EmailCategory(cat)
-                # Optimization: Limit fetch to 20 per category and trust SQL ordering
-                emails = db.get_emails_by_category(cat_enum, limit=20)
-            except ValueError:
-                continue  # Skip invalid categories
+
+        # Group by category for easy access
+        emails_by_cat = defaultdict(list)
+        for e in all_emails:
+            if e.category:
+                emails_by_cat[e.category.value].append(e)
+
+        # Fill candidates list respecting the category priority order
+        for cat_str in categories_str:
+            # We already have sorted by date DESC from SQL for each partition
+            cat_candidates = emails_by_cat.get(cat_str, [])
             
-            # Take top 5 from each category to build a diverse batch of max 20
-            # Trusting DB 'ORDER BY date DESC'
-            for e in emails[:5]: 
+            for e in cat_candidates:
                 if e.id not in seen_ids:
                     candidates.append(e)
                     seen_ids.add(e.id)
+
+                # Check global limit
+                if len(candidates) >= 20:
+                    break
             
-            # Use a hard limit for AI processing to prevent timeouts
             if len(candidates) >= 20:
                 break
         
