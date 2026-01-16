@@ -858,12 +858,18 @@ def api_analyze_subscriptions():
         results = {}
         
         # Limit to top 5 to avoid timeouts during demo
-        for cand in candidates[:5]:
+        top_candidates = candidates[:5]
+        sender_emails = [cand.get('sender_email') for cand in top_candidates if cand.get('sender_email')]
+
+        # Batch fetch recent emails
+        recent_emails_map = db.get_recent_emails_for_senders(sender_emails)
+
+        for cand in top_candidates:
             sender_email = cand.get('sender_email')
             if not sender_email: continue
 
             # Get recent subjects for context
-            recent_emails = db.get_emails_by_sender(sender_email)
+            recent_emails = recent_emails_map.get(sender_email, [])
             subjects = [e.subject for e in recent_emails[:5]]
             
             analysis = client.analyze_subscription_value(
