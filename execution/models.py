@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from typing import Optional, List
+from typing import Optional, List, Dict
 from enum import Enum
 
 
@@ -229,6 +229,34 @@ class Database:
                 (sender_email, limit, offset)
             ).fetchall()
             return [self._row_to_email(row) for row in rows]
+
+    def get_recent_emails_for_senders(self, sender_emails: List[str], limit_per_sender: int = 5) -> Dict[str, List[Email]]:
+        if not sender_emails:
+            return {}
+
+        placeholders = ','.join('?' * len(sender_emails))
+        query = f"""
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY sender_email ORDER BY date DESC) as rn
+                FROM emails
+                WHERE sender_email IN ({placeholders})
+                  AND (user_action IS NULL OR user_action != 'delete')
+            ) WHERE rn <= ?
+        """
+
+        args = sender_emails + [limit_per_sender]
+
+        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, args).fetchall()
+
+            result = {email: [] for email in sender_emails}
+            for row in rows:
+                email = self._row_to_email(row)
+                if email.sender_email in result:
+                    result[email.sender_email].append(email)
+
+            return result
 
     def get_email_ids_by_sender(self, sender_email: str) -> List[str]:
         with sqlite3.connect(self.db_path, timeout=30.0) as conn:
