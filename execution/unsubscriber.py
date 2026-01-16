@@ -31,6 +31,7 @@ class UnsubscribeHandler:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self._gmail_lock = threading.Lock()
+        self._db_lock = threading.Lock()
 
     def can_unsubscribe(self, email: Email) -> bool:
         """Check if we can automatically unsubscribe from this sender."""
@@ -150,7 +151,7 @@ class UnsubscribeHandler:
                     success: bool, error: str = None):
         """Log unsubscribe attempt to database."""
         if self.db:
-            try:
+            with self._db_lock:
                 self.db.log_unsubscribe(
                     email_id=email.id,
                     sender_email=email.sender_email,
@@ -159,9 +160,6 @@ class UnsubscribeHandler:
                     success=success,
                     error_message=error
                 )
-            except Exception:
-                # Swallow database errors during logging to prevent failure of the main operation
-                pass
 
     def _process_unsubscribe_task(self, sender_email: str, email: Email) -> Tuple[str, dict]:
         """Helper to process a single unsubscribe task."""
