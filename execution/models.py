@@ -221,6 +221,29 @@ class Database:
             ).fetchall()
             return [self._row_to_email(row) for row in rows]
 
+    def get_emails_by_categories_diverse(self, categories: List[EmailCategory], limit_per_category: int) -> List[Email]:
+        """Fetch emails from multiple categories efficiently, limiting per category using UNION ALL."""
+        if not categories:
+            return []
+
+        queries = []
+        params = []
+
+        for category in categories:
+            # Use subquery to apply limit per category independently
+            # This allows SQLite to use the index for each category efficiently
+            queries.append(
+                "SELECT * FROM (SELECT * FROM emails WHERE category = ? AND (user_action IS NULL OR user_action != 'delete') ORDER BY date DESC LIMIT ?)"
+            )
+            params.extend([category.value, limit_per_category])
+
+        full_query = " UNION ALL ".join(queries)
+
+        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(full_query, params).fetchall()
+            return [self._row_to_email(row) for row in rows]
+
     def get_emails_by_sender(self, sender_email: str, limit: int = 50, offset: int = 0) -> List[Email]:
         with sqlite3.connect(self.db_path, timeout=30.0) as conn:
             conn.row_factory = sqlite3.Row
