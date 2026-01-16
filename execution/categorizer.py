@@ -142,26 +142,10 @@ class EmailCategorizer:
                     return category
         return None
 
-    def categorize(self, email: Email) -> Tuple[EmailCategory, float]:
+    def _decide_category(self, email: Email, text: str, ml_category: Optional[EmailCategory], ml_confidence: float) -> Tuple[EmailCategory, float]:
         """
-        Categorize a single email.
-        Returns (category, confidence).
+        Combine ML results with heuristics to decide the final category.
         """
-        text = self._prepare_text(email)
-
-        # Try ML model first if trained
-        ml_category = None
-        ml_confidence = 0.0
-
-        if self.is_trained:
-            try:
-                proba = self.pipeline.predict_proba([text])[0]
-                max_idx = proba.argmax()
-                ml_confidence = proba[max_idx]
-                ml_category = EmailCategory(self.pipeline.classes_[max_idx])
-            except Exception as e:
-                print(f"ML prediction error: {e}")
-
         # Get keyword scores
         keyword_scores = self._keyword_score(text)
         max_keyword_cat = max(keyword_scores, key=keyword_scores.get)
@@ -208,11 +192,50 @@ class EmailCategorizer:
         # 7. Default to uncertain
         return EmailCategory.UNCERTAIN, 0.2
 
+    def categorize(self, email: Email) -> Tuple[EmailCategory, float]:
+        """
+        Categorize a single email.
+        Returns (category, confidence).
+        """
+        text = self._prepare_text(email)
+
+        # Try ML model first if trained
+        ml_category = None
+        ml_confidence = 0.0
+
+        if self.is_trained:
+            try:
+                proba = self.pipeline.predict_proba([text])[0]
+                max_idx = proba.argmax()
+                ml_confidence = proba[max_idx]
+                ml_category = EmailCategory(self.pipeline.classes_[max_idx])
+            except Exception as e:
+                print(f"ML prediction error: {e}")
+
+        return self._decide_category(email, text, ml_category, ml_confidence)
+
     def categorize_batch(self, emails: List[Email]) -> List[Tuple[EmailCategory, float]]:
         """Categorize multiple emails efficiently."""
+        texts = [self._prepare_text(email) for email in emails]
+        ml_predictions = [(None, 0.0)] * len(emails)
+
+        if self.is_trained and emails:
+            try:
+                # Batch prediction
+                probas = self.pipeline.predict_proba(texts)
+
+                for i, proba in enumerate(probas):
+                    max_idx = proba.argmax()
+                    category = EmailCategory(self.pipeline.classes_[max_idx])
+                    confidence = proba[max_idx]
+                    ml_predictions[i] = (category, confidence)
+            except Exception as e:
+                print(f"Batch ML prediction error: {e}")
+
         results = []
-        for email in emails:
-            category, confidence = self.categorize(email)
+        for i, email in enumerate(emails):
+            ml_category, ml_confidence = ml_predictions[i]
+            category, confidence = self._decide_category(email, texts[i], ml_category, ml_confidence)
             email.category = category
             email.category_confidence = confidence
             results.append((category, confidence))
