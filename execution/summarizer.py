@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime, timedelta
 
+import concurrent.futures
 from ollama_client import OllamaClient
 from models import Email, Database
 
@@ -194,11 +195,34 @@ JSON:"""
         # Limit processing for local AI speed
         to_summarize = uncertain[:10]
 
-        for email in to_summarize:
-            if not email.ai_summary:
-                summary = self.summarize_email(email)
-                email.ai_summary = summary
-                db.save_email(email)
+        # Filter emails that actually need summarization
+        processing_queue = [e for e in to_summarize if not e.ai_summary]
+
+        if not processing_queue:
+            return emails
+
+        # Use ThreadPoolExecutor to run summarization in parallel
+        # This prevents one slow AI call from blocking others and allows batch DB update
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_email = {
+                executor.submit(self.summarize_email, email): email
+                for email in processing_queue
+            }
+
+            processed_emails = []
+            for future in concurrent.futures.as_completed(future_to_email):
+                email = future_to_email[future]
+                try:
+                    summary = future.result()
+                    if summary:
+                        email.ai_summary = summary
+                        processed_emails.append(email)
+                except Exception as e:
+                    print(f"Error processing email {email.id}: {e}")
+
+            # Batch save all updated emails
+            if processed_emails:
+                db.save_emails_batch(processed_emails)
 
         return emails
 
