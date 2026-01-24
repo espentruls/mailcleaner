@@ -794,16 +794,21 @@ def api_summarize():
         result = {}
 
         if category:
-            # Let's use get_all_emails and filter for simplicity for now
-            all_emails = db.get_all_emails() # Returns Email objects
-            cat_emails = [e for e in all_emails if e.category and e.category.value == category]
+            # Optimized: Use SQL filtering to efficiently fetch emails for the category
+            try:
+                cat_enum = EmailCategory(category)
+            except ValueError:
+                # Handle invalid category gracefully
+                cat_emails = []
+            else:
+                cat_emails = db.get_emails_by_category(cat_enum, limit=50)
             
             # Convert to dicts for Ollama
             email_dicts = [{
                 'sender': e.sender,
                 'subject': e.subject,
                 'snippet': e.snippet
-            } for e in cat_emails[:50]] # Limit to 50 recent
+            } for e in cat_emails]
             
             summary = client.summarize_category(category, email_dicts)
             result = {'summary': summary}
