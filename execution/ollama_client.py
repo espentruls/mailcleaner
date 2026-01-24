@@ -6,6 +6,8 @@ Uses qwen2.5:3b model for privacy-focused, on-device processing.
 import os
 import json
 import requests
+import httpx
+import asyncio
 from typing import Optional, List, Dict, Tuple
 from dataclasses import dataclass
 
@@ -38,6 +40,7 @@ class OllamaClient:
         self.host = host or os.environ.get('OLLAMA_HOST', 'http://127.0.0.1:11434')
         self.model = model
         self.timeout = 60  # seconds
+        self.async_client = httpx.AsyncClient(timeout=self.timeout)
         
     def is_available(self) -> bool:
         """Check if Ollama server is available."""
@@ -389,6 +392,97 @@ JSON Response:"""
              return self._generate(prompt, system).strip('"').strip()
         except:
              return "Could not generate reply."
+
+    async def _generate_async(self, prompt: str, system: str = None) -> str:
+        """
+        Asynchronously generate a response from the model.
+
+        Args:
+            prompt: The user prompt
+            system: Optional system prompt
+
+        Returns:
+            The generated text response
+        """
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3,
+                "num_predict": 256,
+            }
+        }
+
+        if system:
+            payload["system"] = system
+
+        try:
+            response = await self.async_client.post(
+                f"{self.host}/api/generate",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json().get('response', '').strip()
+        except httpx.ReadTimeout:
+            print(f"[OLLAMA ASYNC] Timeout after {self.timeout}s")
+            return ""
+        except Exception as e:
+            print(f"[OLLAMA ASYNC] Error: {e}")
+            return ""
+
+    async def analyze_subscription_value_async(self, sender: str, stats: Dict, recent_subjects: List[str]) -> Dict:
+        """
+        Asynchronously analyze a subscription to recommend KEEP or UNSUBSCRIBE.
+        """
+        system = """You are a ruthless email auditor. Analyze this newsletter subscription and decide if it is worth keeping.
+
+        Criteria for UNSUBSCRIBE:
+        - High unread ratio (user ignores most emails)
+        - Generic, repetitive, or low-value content (ads, alerts)
+        - "Do not reply" or notification-heavy senders
+
+        Criteria for KEEP:
+        - High open rate/read rate
+        - Personalized or valuable content
+        - Critical account alerts
+
+        Return JSON:
+        {
+            "recommendation": "KEEP" | "UNSUBSCRIBE",
+            "reason": "Short, punchy reason (max 10 words)",
+            "confidence": 0.0 to 1.0
+        }"""
+
+        open_rate = 0
+        if stats.get('total', 0) > 0:
+            open_rate = (stats.get('total', 0) - stats.get('unread', 0)) / stats.get('total', 1)
+
+        subjects_text = "\\n".join([f"- {s}" for s in recent_subjects[:5]])
+
+        prompt = f"""Sender: {sender}
+        Stats: {stats.get('total')} emails, {stats.get('unread')} unread.
+        Open Rate: {open_rate:.1%}
+
+        Recent Subjects:
+        {subjects_text}
+
+        JSON Recommendation:"""
+
+        response = await self._generate_async(prompt, system)
+
+        try:
+            # Clean response
+            response = response.strip()
+            if response.startswith("```json"):
+                response = response[7:]
+            if response.endswith("```"):
+                response = response[:-3]
+
+            return json.loads(response)
+        except Exception as e:
+            print(f"Error parsing AI analysis: {e}")
+            return {"recommendation": "KEEP", "reason": "AI Analysis failed", "confidence": 0.0}
 
 
 # Global instance for easy access

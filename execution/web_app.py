@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Dict
 import threading
+import asyncio
 from collections import defaultdict
 
 from flask import Flask, render_template, jsonify, request, redirect, url_for, session
@@ -841,13 +842,13 @@ def api_summarize():
 
 
 @app.route('/api/analyze/subscriptions', methods=['POST'])
-def api_analyze_subscriptions():
+async def api_analyze_subscriptions():
     """Analyze subscriptions and return recommendations."""
     if not is_authenticated():
         return jsonify({'error': 'Not authenticated'}), 401
 
     try:
-        data = request.json or {}
+        data = await request.get_json() or {}
         # List of {sender_email, sender, total, unread}
         candidates = data.get('candidates', [])
         
@@ -855,8 +856,6 @@ def api_analyze_subscriptions():
         if not client.is_available():
             return jsonify({'error': 'AI Service (Ollama) is not available'}), 503
 
-        results = {}
-        
         # Limit to top 5 to avoid timeouts during demo
         top_candidates = candidates[:5]
         sender_emails = [cand.get('sender_email') for cand in top_candidates if cand.get('sender_email')]
@@ -864,21 +863,29 @@ def api_analyze_subscriptions():
         # Batch fetch recent emails
         recent_emails_map = db.get_recent_emails_for_senders(sender_emails)
 
+        tasks = []
         for cand in top_candidates:
             sender_email = cand.get('sender_email')
-            if not sender_email: continue
+            if not sender_email:
+                continue
 
-            # Get recent subjects for context
             recent_emails = recent_emails_map.get(sender_email, [])
             subjects = [e.subject for e in recent_emails[:5]]
             
-            analysis = client.analyze_subscription_value(
+            task = client.analyze_subscription_value_async(
                 sender=cand.get('sender', 'Unknown'),
                 stats={'total': cand.get('count', 0), 'unread': cand.get('unread_count', 0)},
                 recent_subjects=subjects
             )
-            
-            results[sender_email] = analysis
+            tasks.append(task)
+
+        analysis_results = await asyncio.gather(*tasks)
+
+        results = {}
+        for i, cand in enumerate(top_candidates):
+            sender_email = cand.get('sender_email')
+            if sender_email:
+                results[sender_email] = analysis_results[i]
 
         return jsonify(results)
 
