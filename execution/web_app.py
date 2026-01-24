@@ -1281,7 +1281,7 @@ def api_stats():
             
         # Fallback: Refresh if missing
         print("[CACHE MISS] Generating dashboard stats...")
-        # CRITICAL FIX: Must refresh ALL stats (including sender_stats table) not just global
+        # Refresh all stats to ensure sender_stats table and global cache are populated
         db.refresh_all_stats()
         # Fetch the newly generated cache
         data = json.loads(db.get_setting('dashboard_cache'))
