@@ -562,22 +562,18 @@ class Database:
             
             # Most Chatty
             chatty = cursor.execute("""
-                SELECT sender_email, sender, COUNT(*) as count 
-                FROM emails 
-                WHERE (user_action IS NULL OR user_action != 'delete')
-                GROUP BY sender_email 
-                ORDER BY count DESC 
+                SELECT email as sender_email, name as sender, total_emails as count
+                FROM sender_stats
+                ORDER BY total_emails DESC
                 LIMIT 5
             """).fetchall()
             
             # Most Ignored (Unread & High Volume)
             junk = cursor.execute("""
-                SELECT sender_email, sender, COUNT(*) as count,
-                       SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread
-                FROM emails 
-                WHERE (user_action IS NULL OR user_action != 'delete')
-                GROUP BY sender_email 
-                ORDER BY unread DESC, count DESC 
+                SELECT email as sender_email, name as sender, total_emails as count,
+                       unread_count as unread
+                FROM sender_stats
+                ORDER BY unread_count DESC, total_emails DESC
                 LIMIT 5
             """).fetchall()
             
