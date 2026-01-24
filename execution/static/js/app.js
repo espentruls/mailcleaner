@@ -455,8 +455,6 @@ async function loadCleanupSuggestions() {
         showLoading('Scanning for clutter...');
         const data = await api('/suggestions/deletion', { method: 'POST' });
 
-        console.log('Cleanup Data:', data); // Debugging
-
         if (!data || !data.suggestions || data.suggestions.length === 0) {
             results.innerHTML = `
                 <div class="empty-state" style="text-align: center; padding: 3rem; color: var(--text-secondary);">
