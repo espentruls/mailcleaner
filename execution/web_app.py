@@ -688,52 +688,17 @@ def api_get_emails_grouped():
 
     try:
         read_filter = request.args.get('read_filter', 'all')
-        emails = db.get_all_emails(read_filter=read_filter, limit=2000)
 
-        # Group by sender
-        groups = defaultdict(lambda: {
-            'sender': '',
-            'sender_email': '',
-            'emails': [],
-            'total': 0,
-            'unread': 0,
-            'categories': defaultdict(int),
-            'has_unsubscribe': False,
-            'last_received': None,
-            'summary': None
-        })
+        # Optimization: Use SQL-based grouping instead of fetching 2000 emails
+        # Fetch top 100 groups, which covers most use cases better than arbitrary 2000 email limit
+        groups = db.get_rich_sender_groups(read_filter=read_filter, limit=100)
 
-        for email in emails:
-            key = email.sender_email
-            group = groups[key]
-            group['sender'] = email.sender
-            group['sender_email'] = email.sender_email
-            group['emails'].append(email.to_dict())
-            group['total'] += 1
-            if not email.is_read:
-                group['unread'] += 1
-            if email.category:
-                group['categories'][email.category.value] += 1
-            if email.unsubscribe_link or email.unsubscribe_email:
-                group['has_unsubscribe'] = True
-            if not group['last_received'] or email.date > datetime.fromisoformat(group['last_received']):
-                group['last_received'] = email.date.isoformat() if email.date else None
-
-        # Convert to list and sort by total
-        result = []
-        for key, group in groups.items():
-            group['categories'] = dict(group['categories'])
-            # Limit emails in response to save bandwidth
-            group['preview_emails'] = group['emails'][:5]
-            del group['emails']
-            result.append(group)
-
-        result.sort(key=lambda x: x['total'], reverse=True)
+        total_emails = sum(g['total'] for g in groups)
 
         return jsonify({
-            'groups': result,
-            'total_groups': len(result),
-            'total_emails': len(emails)
+            'groups': groups,
+            'total_groups': len(groups),
+            'total_emails': total_emails
         })
 
     except Exception as e:

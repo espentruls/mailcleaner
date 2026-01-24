@@ -330,6 +330,103 @@ class Database:
             """, (limit,)).fetchall()
             return [dict(row) for row in rows]
 
+    def get_rich_sender_groups(self, read_filter: str = 'all', limit: int = 50) -> List[dict]:
+        """
+        Get grouped emails by sender with rich details (previews, categories).
+        Optimized to use SQL grouping instead of in-memory processing.
+        """
+        with sqlite3.connect(self.db_path, timeout=30.0) as conn:
+            conn.row_factory = sqlite3.Row
+
+            # Base Where Clause
+            where_clauses = ["(user_action IS NULL OR user_action != 'delete')"]
+
+            if read_filter == 'unread':
+                where_clauses.append("is_read = 0")
+            elif read_filter == 'read':
+                where_clauses.append("is_read = 1")
+
+            where_str = " AND ".join(where_clauses)
+
+            # 1. Get Top Senders
+            query_groups = f"""
+                SELECT
+                    sender_email,
+                    MAX(sender) as sender,
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END) as unread,
+                    MAX(CASE WHEN unsubscribe_link IS NOT NULL OR unsubscribe_email IS NOT NULL THEN 1 ELSE 0 END) as has_unsubscribe,
+                    MAX(date) as last_received
+                FROM emails
+                WHERE {where_str}
+                GROUP BY sender_email
+                ORDER BY total DESC
+                LIMIT ?
+            """
+
+            groups = conn.execute(query_groups, (limit,)).fetchall()
+
+            if not groups:
+                return []
+
+            result_map = {}
+            sender_emails = []
+            for row in groups:
+                s_email = row['sender_email']
+                sender_emails.append(s_email)
+                result_map[s_email] = {
+                    'sender': row['sender'],
+                    'sender_email': s_email,
+                    'total': row['total'],
+                    'unread': row['unread'] or 0,
+                    'has_unsubscribe': bool(row['has_unsubscribe']),
+                    'last_received': row['last_received'],
+                    'summary': None,
+                    'categories': {},
+                    'preview_emails': []
+                }
+
+            # Prepare placeholders for IN clause
+            placeholders = ','.join('?' for _ in sender_emails)
+            in_params = sender_emails
+
+            # 2. Get Categories
+            query_cats = f"""
+                SELECT sender_email, category, COUNT(*) as count
+                FROM emails
+                WHERE sender_email IN ({placeholders}) AND category IS NOT NULL AND {where_str}
+                GROUP BY sender_email, category
+            """
+
+            cat_rows = conn.execute(query_cats, in_params).fetchall()
+            for row in cat_rows:
+                s_email = row['sender_email']
+                cat = row['category']
+                if s_email in result_map:
+                    result_map[s_email]['categories'][cat] = row['count']
+
+            # 3. Get Preview Emails (Top 5)
+            query_previews = f"""
+                SELECT *
+                FROM (
+                    SELECT *, ROW_NUMBER() OVER (PARTITION BY sender_email ORDER BY date DESC) as rn
+                    FROM emails
+                    WHERE sender_email IN ({placeholders}) AND {where_str}
+                )
+                WHERE rn <= 5
+            """
+
+            preview_rows = conn.execute(query_previews, in_params).fetchall()
+
+            for row in preview_rows:
+                s_email = row['sender_email']
+                if s_email in result_map:
+                    email_obj = self._row_to_email(row)
+                    result_map[s_email]['preview_emails'].append(email_obj.to_dict())
+
+            # Return list in order of top senders
+            return [result_map[email] for email in sender_emails]
+
     def _row_to_email(self, row) -> Email:
         return Email(
             id=row['id'],
